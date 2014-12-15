@@ -89,16 +89,35 @@ struct SMTLIBParser {
     return false;
   }
 
-  APInt parseModel(std::string &ErrStr) {
-    if (!consumeExpected('(', ErrStr))
-      return APInt();
-    if (!consumeExpected('(', ErrStr))
-      return APInt();
-    if (!consumeSExpr(ErrStr))
-      return APInt();
+  bool consumeBvName(std::string &ErrStr) {
+    while (Begin != End && (*Begin != ' ' && *Begin != '\n' && *Begin != '\r' &&
+                            *Begin != '\t'))
+      ++Begin;
+    if (Begin == End) {
+      ErrStr = "unexpected EOF";
+      return false;
+    }
+    return true;
+  }
 
-    if (!consumeExpected('(', ErrStr))
+  APInt parseBinaryBitVector(std::string &ErrStr) {
+    ErrStr.clear();
+    const char *NumBegin = Begin;
+    while (Begin != End && (*Begin == '0' || *Begin == '1'))
+      ++Begin;
+    const char *NumEnd = Begin;
+
+    if (!consumeExpected(')', ErrStr))
       return APInt();
+    if (!consumeExpected(')', ErrStr))
+      return APInt();
+    unsigned Width = NumEnd - NumBegin;
+
+    return APInt(Width, StringRef(NumBegin, Width), 2);
+  }
+
+  APInt parseDecimalBitVector(std::string &ErrStr) {
+    ErrStr.clear();
     if (!consumeExpected('_', ErrStr))
       return APInt();
     if (!consumeExpected('b', ErrStr))
@@ -132,6 +151,41 @@ struct SMTLIBParser {
       return APInt();
 
     return APInt(Width, StringRef(NumBegin, NumEnd - NumBegin), 10);
+  }
+
+  APInt parseHexBitVector(std::string &ErrStr) {
+    ErrStr.clear();
+    const char *NumBegin = Begin;
+    while (Begin != End && ((*Begin >= '0' && *Begin <= '9') ||
+           (*Begin >= 'a' && *Begin <= 'f') ||
+           (*Begin >= 'A' && *Begin <= 'F')))
+      ++Begin;
+    const char *NumEnd = Begin;
+
+    if (!consumeExpected(')', ErrStr))
+      return APInt();
+    if (!consumeExpected(')', ErrStr))
+      return APInt();
+    unsigned Width = NumEnd - NumBegin;
+
+    return APInt(Width*4, StringRef(NumBegin, Width), 16);
+  }
+
+  APInt parseModel(std::string &ErrStr) {
+    if (!consumeExpected('(', ErrStr))
+      return APInt();
+    if (!consumeExpected('(', ErrStr))
+      return APInt();
+    if (!consumeSExpr(ErrStr))
+      return APInt();
+    if (consumeExpected('#', ErrStr)) {
+      if (consumeExpected('x', ErrStr))
+        return parseHexBitVector(ErrStr);
+      else
+        return parseBinaryBitVector(ErrStr);
+    } else {
+      return parseDecimalBitVector(ErrStr);
+    }
   }
 };
 
@@ -341,5 +395,5 @@ std::unique_ptr<SMTLIBSolver> souper::createSTPSolver(SolverProgram Prog,
 std::unique_ptr<SMTLIBSolver> souper::createZ3Solver(SolverProgram Prog,
                                                      bool Keep) {
   return std::unique_ptr<SMTLIBSolver>(
-      new ProcessSMTLIBSolver("Z3", Keep, Prog, false, {"-smt2", "-in"}));
+      new ProcessSMTLIBSolver("Z3", Keep, Prog, true, {"-smt2", "-in"}));
 }

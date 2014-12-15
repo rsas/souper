@@ -1,7 +1,7 @@
 ; REQUIRES: solver
 
 ; RUN: llvm-as -o %t1 %s
-; RUN: %souper %t1 > %t2
+; RUN: %souper %t1 | tail -6 > %t2
 ; RUN: %souper-check %solver -infer-rhs -print-replacement %t2 > %t3
 ; RUN: FileCheck %s -check-prefix=SUCCESS < %t3
 ; RUN: %parser-test -LHS < %t2

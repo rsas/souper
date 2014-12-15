@@ -770,13 +770,16 @@ CandidateExpr souper::GetCandidateExprForReplacement(
 
 std::string souper::BuildQuery(const std::vector<InstMapping> &PCs,
                                InstMapping Mapping,
-                               std::vector<Inst *> *ModelVars) {
+                               std::vector<Inst *> *ModelVars, bool Negate) {
   std::string SMTStr;
   llvm::raw_string_ostream SMTSS(SMTStr);
   ConstraintManager Manager;
   CandidateExpr CE = GetCandidateExprForReplacement(PCs, Mapping);
   Query KQuery(Manager, CE.E);
   ExprSMTLIBPrinter Printer;
+  if (Negate) {
+    KQuery.expr = Expr::createIsZero(KQuery.expr);
+  }
   Printer.setOutput(SMTSS);
   Printer.setQuery(KQuery);
   std::vector<const klee::Array *> Arrays;
