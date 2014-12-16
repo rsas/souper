@@ -177,7 +177,8 @@ struct SMTLIBParser {
     if (!consumeExpected('(', ErrStr))
       return APInt();
     if (!consumeSExpr(ErrStr))
-      return APInt();
+      if (!consumeBvName(ErrStr))
+        return APInt();
     if (consumeExpected('#', ErrStr)) {
       if (consumeExpected('x', ErrStr))
         return parseHexBitVector(ErrStr);
