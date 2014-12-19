@@ -89,7 +89,7 @@ public:
         return EC;
       if (IsSat) {
         // We found a model for a constant
-        Inst *Const;
+        Inst *Const = 0;
         for (unsigned J = 0; J != ModelInsts.size(); ++J) {
           if (ModelInsts[J]->Name == "constant") {
             Const = IC.getConst(ModelVals[J]);
