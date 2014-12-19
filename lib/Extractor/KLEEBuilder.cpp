@@ -777,9 +777,8 @@ std::string souper::BuildQuery(const std::vector<InstMapping> &PCs,
   CandidateExpr CE = GetCandidateExprForReplacement(PCs, Mapping);
   Query KQuery(Manager, CE.E);
   ExprSMTLIBPrinter Printer;
-  if (Negate) {
+  if (Negate)
     KQuery.expr = Expr::createIsZero(KQuery.expr);
-  }
   Printer.setOutput(SMTSS);
   Printer.setQuery(KQuery);
   std::vector<const klee::Array *> Arrays;
