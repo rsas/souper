@@ -56,13 +56,14 @@ struct ExtractorTest : testing::Test {
     CS = ExtractCandidates(&*M->begin(), IC, EBC, Opts);
     for (auto &B : CS.Blocks) {
       for (auto &R : B->Replacements) {
-        assert(R.Mapping.LHS->Width == 1);
+        if (R.Mapping.LHS->Width != 1)
+          continue;
         std::vector<Inst *>Guesses { IC.getConst(APInt(1, false)),
                                      IC.getConst(APInt(1, true)) };
         for (auto I : Guesses) {
           R.Mapping.RHS = I;
           std::unique_ptr<CandidateExpr> CE(
-              new CandidateExpr(GetCandidateExprForReplacement(R.PCs,
+              new CandidateExpr(GetCandidateExprForReplacement(R.BPCs, R.PCs,
                                                                R.Mapping)));
           CandExprs.emplace_back(std::move(CE));
         }
@@ -75,6 +76,8 @@ struct ExtractorTest : testing::Test {
   bool hasCandidate(std::string Expected) {
     for (auto &B : CS.Blocks) {
       for (auto &R : B->Replacements) {
+        if (R.Mapping.LHS->Width != 1)
+          continue;
         std::string Str;
         llvm::raw_string_ostream SS(Str);
         R.print(SS, /*printNames=*/true);

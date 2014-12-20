@@ -39,7 +39,19 @@ using namespace llvm;
 namespace {
 
 static cl::opt<bool> NoInfer("souper-no-infer",
-    cl::desc("Populate the external cache, but don't infer replacements"),
+    cl::desc("Populate the external cache, but don't infer replacements (default=false)"),
+    cl::init(false));
+
+static cl::opt<bool> InferI1("souper-infer-i1",
+    cl::desc("Infer Boolean values (default=true)"),
+    cl::init(true));
+
+static cl::opt<bool> InferNop("souper-infer-nop",
+    cl::desc("Infer nops (default=false)"),
+    cl::init(false));
+
+static cl::opt<bool> InferUnary("souper-infer-unary",
+    cl::desc("Infer unary instructions (default=false)"),
     cl::init(false));
 static cl::opt<bool> InferInts("souper-infer-iN",
     cl::desc("Infer iN integers for N>1 (default=false)"),
@@ -53,24 +65,46 @@ public:
   BaseSolver(std::unique_ptr<SMTLIBSolver> SMTSolver, unsigned Timeout)
       : SMTSolver(std::move(SMTSolver)), Timeout(Timeout) {}
 
-  std::error_code infer(const std::vector<InstMapping> &PCs,
+private:
+  void getInputs(Inst *I, std::set<Inst *> &Inputs) {
+    if (Inputs.insert(I).second)
+      for (auto Op : I->Ops)
+        getInputs(Op, Inputs);
+  }
+
+  int costHelper(Inst *I, std::set<Inst *> &Visited) {
+    if (!Visited.insert(I).second)
+      return 0;
+    int Cost = 1;
+    for (auto Op : I->Ops)
+      Cost += costHelper(Op, Visited);
+    return Cost;
+  }
+
+  int cost(Inst *I) {
+    std::set<Inst *> Visited;
+    return costHelper(I, Visited);
+  }
+
+  std::error_code infer(const BlockPCs &BPCs,
+                        const std::vector<InstMapping> &PCs,
                         Inst *LHS, Inst *&RHS, InstContext &IC) {
     std::error_code EC;
 
-    if (LHS->Width == 1) {
+    if (LHS->Width == 1 && InferI1) {
       std::vector<Inst *>Guesses { IC.getConst(APInt(1, true)),
                                    IC.getConst(APInt(1, false)) };
-      for (auto I : Guesses) {
-        // TODO: we can trivially synthesize an i1 undef by checking for validity
-        // of both guesses
-        InstMapping Mapping(LHS, I);
+      for (auto G : Guesses) {
+        // TODO: we can trivially synthesize an i1 undef by checking for
+        // validity of both guesses
+        InstMapping Mapping(LHS, G);
         bool IsSat;
-        EC = SMTSolver->isSatisfiable(BuildQuery(PCs, Mapping, 0), IsSat, 0, 0,
-                                      Timeout);
+        EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0),
+                                      IsSat, 0, 0, Timeout);
         if (EC)
           return EC;
         if (!IsSat) {
-          RHS = I;
+          RHS = G;
           return EC;
         }
       }
@@ -81,7 +115,8 @@ public:
       std::vector<llvm::APInt> ModelVals;
       Inst *I = IC.createVar(LHS->Width, "constant");
       InstMapping Mapping(LHS, I);
-      std::string Query = BuildQuery(PCs, Mapping, &ModelInsts, /*Negate=*/true);
+      std::string Query = BuildQuery(BPCs, PCs, Mapping,
+                                      &ModelInsts, /*Negate=*/true);
       bool IsSat;
       EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
                                     &ModelVals, Timeout);
@@ -99,7 +134,7 @@ public:
         assert(Const && "there must be a model for the constant");
         // Check if the constant is valid for all inputs
         InstMapping ConstMapping(LHS, Const);
-        EC = SMTSolver->isSatisfiable(BuildQuery(PCs, ConstMapping, 0),
+        EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, ConstMapping, 0),
                                       IsSat, 0, 0, Timeout);
         if (EC)
           return EC;
@@ -110,17 +145,78 @@ public:
       }
     }
 
+    std::set<Inst *> Inputs;
+    if (InferNop || InferUnary)
+      for (auto Op : LHS->Ops)
+        getInputs(Op, Inputs);
+
+    if (InferNop) {
+      for (auto I : Inputs) {
+        if (I->Width == 1 &&
+            (I->K == Inst::Const || I->K == Inst::UntypedConst))
+          continue;
+        if (LHS->Width != I->Width)
+          continue;
+        InstMapping Mapping(LHS, I);
+        bool IsSat;
+        EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0), IsSat,
+                                      0, 0, Timeout);
+        if (EC)
+          return EC;
+        if (!IsSat) {
+          RHS = I;
+          return EC;
+        }
+      }
+    }
+
+    if (InferUnary) {
+      int LHSCost = cost(LHS);
+      for (auto I : Inputs) {
+        if (I->Width == 1 &&
+            (I->K == Inst::Const || I->K == Inst::UntypedConst))
+          continue;
+        std::vector<Inst *> Guesses;
+        if (LHS->Width > I->Width) {
+          Guesses.push_back(IC.getInst(Inst::SExt, LHS->Width, {I}));
+          Guesses.push_back(IC.getInst(Inst::ZExt, LHS->Width, {I}));
+        } else if (LHS->Width < I->Width) {
+          Guesses.push_back(IC.getInst(Inst::Trunc, LHS->Width, {I}));
+        } else {
+          Guesses.push_back(IC.getInst(Inst::Xor, LHS->Width,
+              { IC.getConst(APInt(I->Width, -1)), I }));
+          Guesses.push_back(IC.getInst(Inst::Sub, LHS->Width,
+              { IC.getConst(APInt(I->Width, 0)), I }));
+        }
+        for (auto G : Guesses) {
+          if (LHSCost - cost(G) < 1)
+            continue;
+          InstMapping Mapping(LHS, G);
+          bool IsSat;
+          EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0),
+                                        IsSat, 0, 0, Timeout);
+          if (EC)
+            return EC;
+          if (!IsSat) {
+            RHS = G;
+            return EC;
+          }
+        }
+      }
+    }
+
     RHS = 0;
     return EC;
   }
 
-  std::error_code isValid(const std::vector<InstMapping> &PCs,
+  std::error_code isValid(const BlockPCs &BPCs,
+                          const std::vector<InstMapping> &PCs,
                           InstMapping Mapping, bool &IsValid,
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
     std::string Query;
     if (Model && SMTSolver->supportsModels()) {
       std::vector<Inst *> ModelInsts;
-      std::string Query = BuildQuery(PCs, Mapping, &ModelInsts);
+      std::string Query = BuildQuery(BPCs, PCs, Mapping, &ModelInsts);
       bool IsSat;
       std::vector<llvm::APInt> ModelVals;
       std::error_code EC = SMTSolver->isSatisfiable(
@@ -136,8 +232,9 @@ public:
       return EC;
     } else {
       bool IsSat;
-      std::error_code EC = SMTSolver->isSatisfiable(BuildQuery(PCs, Mapping, 0),
-                                                    IsSat, 0, 0, Timeout);
+      std::error_code EC =
+        SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0),
+                                 IsSat, 0, 0, Timeout);
       IsValid = !IsSat;
       return EC;
     }
@@ -158,14 +255,15 @@ public:
   MemCachingSolver(std::unique_ptr<Solver> UnderlyingSolver)
       : UnderlyingSolver(std::move(UnderlyingSolver)) {}
 
-  std::error_code infer(const std::vector<InstMapping> &PCs,
+  std::error_code infer(const BlockPCs &BPCs,
+                        const std::vector<InstMapping> &PCs,
                         Inst *LHS, Inst *&RHS, InstContext &IC) {
     ReplacementContext Context;
-    std::string Repl = GetReplacementLHSString(PCs, LHS, Context);
+    std::string Repl = GetReplacementLHSString(BPCs, PCs, LHS, Context);
     const auto &ent = InferCache.find(Repl);
     if (ent == InferCache.end()) {
       ++MemMissesInfer;
-      std::error_code EC = UnderlyingSolver->infer(PCs, LHS, RHS, IC);
+      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
       std::string RHSStr;
       if (!EC && RHS) {
         RHSStr = GetReplacementRHSString(RHS, Context);
@@ -188,18 +286,20 @@ public:
     }
   }
 
-  std::error_code isValid(const std::vector<InstMapping> &PCs,
+  std::error_code isValid(const BlockPCs &BPCs,
+                          const std::vector<InstMapping> &PCs,
                           InstMapping Mapping, bool &IsValid,
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
     // TODO: add caching support for models.
     if (Model)
-      return UnderlyingSolver->isValid(PCs, Mapping, IsValid, Model);
+      return UnderlyingSolver->isValid(BPCs, PCs, Mapping, IsValid, Model);
 
-    std::string Repl = GetReplacementString(PCs, Mapping);
+    std::string Repl = GetReplacementString(BPCs, PCs, Mapping);
     const auto &ent = IsValidCache.find(Repl);
     if (ent == IsValidCache.end()) {
       ++MemMissesIsValid;
-      std::error_code EC = UnderlyingSolver->isValid(PCs, Mapping, IsValid, 0);
+      std::error_code EC = UnderlyingSolver->isValid(BPCs, PCs,
+                                                     Mapping, IsValid, 0);
       IsValidCache.emplace(Repl, std::make_pair(EC, IsValid));
       return EC;
     } else {
@@ -224,10 +324,11 @@ public:
       : UnderlyingSolver(std::move(UnderlyingSolver)), KV(KV) {
   }
 
-  std::error_code infer(const std::vector<InstMapping> &PCs,
+  std::error_code infer(const BlockPCs &BPCs,
+                        const std::vector<InstMapping> &PCs,
                         Inst *LHS, Inst *&RHS, InstContext &IC) {
     ReplacementContext Context;
-    std::string LHSStr = GetReplacementLHSString(PCs, LHS, Context);
+    std::string LHSStr = GetReplacementLHSString(BPCs, PCs, LHS, Context);
     std::string S;
     if (KV->hGet(LHSStr, "result", S)) {
       ++ExternalHits;
@@ -247,7 +348,7 @@ public:
         KV->hSet(LHSStr, "result", "");
         return std::error_code();
       }
-      std::error_code EC = UnderlyingSolver->infer(PCs, LHS, RHS, IC);
+      std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
       std::string RHSStr;
       if (!EC && RHS) {
         RHSStr = GetReplacementRHSString(RHS, Context);
@@ -257,12 +358,13 @@ public:
     }
   }
 
-  std::error_code isValid(const std::vector<InstMapping> &PCs,
+  std::error_code isValid(const BlockPCs &BPCs,
+                          const std::vector<InstMapping> &PCs,
                           InstMapping Mapping, bool &IsValid,
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
     // N.B. we decided that since the important clients have moved to infer(),
     // we'll no longer support external caching for isValid()
-    return UnderlyingSolver->isValid(PCs, Mapping, IsValid, Model);
+    return UnderlyingSolver->isValid(BPCs, PCs, Mapping, IsValid, Model);
   }
 
   std::string getName() {
