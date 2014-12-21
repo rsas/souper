@@ -150,7 +150,75 @@ private:
       for (auto Op : LHS->Ops)
         getInputs(Op, Inputs);
 
-    if (InferNop) {
+    if (true && InferNop) {
+      std::vector<Inst *> Inputs2;
+      for (auto I : Inputs) {
+        if (I->Width == 1 &&
+            (I->K == Inst::Const || I->K == Inst::UntypedConst))
+          continue;
+        if (LHS->Width != I->Width)
+          continue;
+        Inputs2.push_back(I);
+      }
+      //llvm::outs() << "Total cands: " << Inputs2.size() << "\n";
+      //Inst *Tmp = Inputs2[11];
+      //Inst *Tmp2 = Inputs2[1];
+      //Inst *Tmp3 = Inputs2[8];
+      //Inputs2.clear();
+      //Inputs2.push_back(Tmp);
+      //Inputs2.push_back(Tmp2);
+      //Inputs2.push_back(Tmp3);
+      Inst *LHSVar = IC.createVar(LHS->Width, "index");
+      Inst *RHSSel = 0;
+      Inst *C, *T, *F;
+      if (Inputs2.size() > 0) {
+        int Index = Inputs2.size()-1;
+        C = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[Index]});
+        T = IC.getConst(APInt(LHS->Width, -1));
+        F = IC.getConst(APInt(LHS->Width, Index));
+        RHSSel = IC.getInst(Inst::Select, LHS->Width, {C, T, F});
+      }
+      if (Inputs2.size() > 1) {
+        for (int Index = Inputs2.size()-2; Index >= 0; --Index) {
+          C = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[Index]});
+          F = IC.getConst(APInt(LHS->Width, Index));
+          RHSSel = IC.getInst(Inst::Select, LHS->Width, {C, RHSSel, F});
+        }
+      }
+      if (!RHSSel)
+        return EC;
+
+      std::vector<Inst *> ModelInsts;
+      std::vector<llvm::APInt> ModelVals;
+      InstMapping Mapping(LHSVar, RHSSel);
+      std::string Query = BuildQuery(BPCs, PCs, Mapping,
+                                     &ModelInsts, /*Negate=*/true);
+      bool IsSat;
+      EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
+                                    &ModelVals, Timeout);
+      if (EC)
+        return EC;
+      if (IsSat) {
+        for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+          if (ModelInsts[J]->Name == "index") {
+            llvm::outs() << ModelVals[J] << "\n";
+            uint64_t N = ModelVals[J].getZExtValue(); 
+            if (!ModelVals[J].isNegative() || N != 1) {
+              if (ModelVals[J].isNegative()) {
+                // TODO: Multiple solutions
+                break;
+              }
+              RHS = Inputs2[N];
+              return EC;
+            }
+            break;
+          }
+        }
+      } else {
+        llvm::outs() << "UNSAT\n";
+      }
+    }
+    if (false && InferNop) {
       for (auto I : Inputs) {
         if (I->Width == 1 &&
             (I->K == Inst::Const || I->K == Inst::UntypedConst))
