@@ -892,6 +892,7 @@ CandidateExpr souper::GetCandidateExprForReplacement(
   }
 
   CE.E = Expr::createImplies(Ante, Cons);
+  //CE.E = AndExpr::create(Ante, Cons);
 
   return CE;
 }
@@ -906,8 +907,12 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
   CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
   Query KQuery(Manager, CE.E);
   ExprSMTLIBPrinter Printer;
-  if (Negate)
+  if (Negate) {
+    //KQuery.expr->dump();
     KQuery.expr = Expr::createIsZero(KQuery.expr);
+  } else {
+    //Expr::createIsZero(KQuery.expr)->dump();
+  }
   Printer.setOutput(SMTSS);
   Printer.setQuery(KQuery);
   std::vector<const klee::Array *> Arrays;
@@ -930,6 +935,7 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
     PP->print(CE.E);
     SMTSS << '\n';
   }
+  //llvm::outs() << SMTSS.str();
 
   return SMTSS.str();
 }

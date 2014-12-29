@@ -24,6 +24,7 @@
 #include "souper/Parser/Parser.h"
 
 #include <sstream>
+#include <stack>
 #include <unordered_map>
 
 STATISTIC(MemHitsInfer, "Number of internal cache hits for infer()");
@@ -84,6 +85,33 @@ private:
   int cost(Inst *I) {
     std::set<Inst *> Visited;
     return costHelper(I, Visited);
+  }
+
+  Inst *getInstCopy(Inst *I, InstContext &IC, std::map<Inst *, Inst *> &VarMap) {
+    auto It = VarMap.find(I);
+    if (It != VarMap.end())
+      return It->second;
+
+    std::vector<Inst *> Ops;
+    for (auto Op : I->Ops)
+      Ops.push_back(getInstCopy(Op, IC, VarMap));
+
+    if (I->K == Inst::Var) {
+      // Create var copy
+      StringRef Name;
+      Inst *New = IC.createVar(I->Width, Name);
+      VarMap[I] = New;
+      return New;
+    } else if (I->K == Inst::Phi) {
+      // Create phi copy
+      Inst *New = IC.getPhi(IC.createBlock(I->B->Number), Ops);
+      VarMap[I] = New;
+      return New;
+    } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
+      return I;
+    } else {
+      return IC.getInst(I->K, I->Width, Ops);
+    }
   }
 
   std::error_code infer(const BlockPCs &BPCs,
@@ -150,7 +178,7 @@ private:
       for (auto Op : LHS->Ops)
         getInputs(Op, Inputs);
 
-    if (true && InferNop) {
+    if (false && InferNop) {
       std::vector<Inst *> Inputs2;
       for (auto I : Inputs) {
         if (I->Width == 1 &&
@@ -160,54 +188,99 @@ private:
           continue;
         Inputs2.push_back(I);
       }
-      //llvm::outs() << "Total cands: " << Inputs2.size() << "\n";
-      //Inst *Tmp = Inputs2[11];
-      //Inst *Tmp2 = Inputs2[1];
-      //Inst *Tmp3 = Inputs2[8];
-      //Inputs2.clear();
-      //Inputs2.push_back(Tmp);
-      //Inputs2.push_back(Tmp2);
-      //Inputs2.push_back(Tmp3);
-      Inst *LHSVar = IC.createVar(LHS->Width, "index");
+
       Inst *RHSSel = 0;
+
+      //Inst *LHSVar = IC.getConst(APInt(1, 0));
+      //std::vector<InstMapping> NewPCs(PCs);
+      //if (Inputs2.size() > 0) {
+      //  Inst *Ne = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[0]});
+      //  RHSSel = IC.getInst(Inst::And, 1, { Ne, IC.getConst(APInt(1, 1)) });
+      //  // Create LHS and RHS copies here
+      //  for (int Index = 1; Index < Inputs2.size(); ++Index) {
+      //    std::map<Inst *, Inst *> VarMap;
+      //    //ReplacementContext Context;
+      //    Inst *NewLHS = getInstCopy(LHS, IC, VarMap);
+      //    //Inst *NewLHS = LHS;
+      //    //PrintReplacementRHS(llvm::outs(), NewLHS, Context);
+      //    Inst *NewRHS = getInstCopy(Inputs2[Index], IC, VarMap);
+      //    //Inst *NewRHS = Inputs2[Index];
+      //    //PrintReplacementRHS(llvm::outs(), NewRHS, Context);
+      //    RHSSel = IC.getInst(Inst::And, 1, { RHSSel, IC.getInst(Inst::Ne, LHS->Width, { NewLHS, NewRHS } ) } );
+      //    //RHSSel = IC.getInst(Inst::Or, 1, { RHSSel, IC.getInst(Inst::Eq, LHS->Width, { LHS, Inputs2[Index] } ) } );
+      //    for (const auto PC : PCs) {
+      //      InstMapping NewPC(getInstCopy(PC.LHS, IC, VarMap), getInstCopy(PC.RHS, IC, VarMap));
+      //      NewPCs.push_back(NewPC);
+      //    }
+      //  }
+      //}
+
+      Inst *LHSVar = IC.getConst(APInt(32, 0));
+      //Inst *LHSVar = IC.createVar(32, "index");
+      //LHSVar = IC.getInst(Inst::And, 32, { LHSVar, IC.getConst(APInt(32, 1<<Inputs2.size())) });
+      std::vector<InstMapping> NewPCs(PCs);
       Inst *C, *T, *F;
       if (Inputs2.size() > 0) {
         int Index = Inputs2.size()-1;
-        C = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[Index]});
-        T = IC.getConst(APInt(LHS->Width, -1));
-        F = IC.getConst(APInt(LHS->Width, Index));
+        Inst *C = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[Index]});
+        T = IC.getConst(APInt(32, 1<<Inputs2.size()));
+        //if (Inputs2.size() == 1)
+        //  F = IC.getConst(APInt(32, 0));
+        //else
+        //  F = IC.getConst(APInt(32, 1<<Index));
+        //T = IC.getConst(APInt(32, Inputs2.size()));
+        //F = IC.getConst(APInt(32, Index));
+        T = IC.getConst(APInt(32, 1));
+        F = IC.getConst(APInt(32, 0));
         RHSSel = IC.getInst(Inst::Select, LHS->Width, {C, T, F});
       }
       if (Inputs2.size() > 1) {
         for (int Index = Inputs2.size()-2; Index >= 0; --Index) {
-          C = IC.getInst(Inst::Ne, LHS->Width, {LHS, Inputs2[Index]});
-          F = IC.getConst(APInt(LHS->Width, Index));
+          std::map<Inst *, Inst *> VarMap;
+          Inst *C = IC.getInst(Inst::Ne, LHS->Width, {getInstCopy(LHS, IC, VarMap), getInstCopy(Inputs2[Index], IC, VarMap)});
+          //F = IC.getConst(APInt(32, Index));
+          //if (Index == 0)
+          //  F = IC.getConst(APInt(32, 0));
+          //else
+          //  F = IC.getConst(APInt(32, 1<<Index));
+          F = IC.getConst(APInt(32, 0));
           RHSSel = IC.getInst(Inst::Select, LHS->Width, {C, RHSSel, F});
+          for (const auto PC : PCs) {
+            InstMapping NewPC(getInstCopy(PC.LHS, IC, VarMap), getInstCopy(PC.RHS, IC, VarMap));
+            NewPCs.push_back(NewPC);
+          }
         }
       }
+
       if (!RHSSel)
         return EC;
 
       std::vector<Inst *> ModelInsts;
       std::vector<llvm::APInt> ModelVals;
       InstMapping Mapping(LHSVar, RHSSel);
-      std::string Query = BuildQuery(BPCs, PCs, Mapping,
-                                     &ModelInsts, /*Negate=*/true);
+      std::string Query = BuildQuery(BPCs, NewPCs, Mapping,
+                                     &ModelInsts, /*Negate=*/false);
+      //std::string Query = BuildQuery(BPCs, PCs, Mapping,
+      //                               &ModelInsts, /*Negate=*/false);
       bool IsSat;
       EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
                                     &ModelVals, Timeout);
       if (EC)
         return EC;
       if (IsSat) {
+        llvm::outs() << "SAT\n";
+        //return EC;
         for (unsigned J = 0; J != ModelInsts.size(); ++J) {
           if (ModelInsts[J]->Name == "index") {
-            llvm::outs() << ModelVals[J] << "\n";
+            llvm::outs() << "Model: " << ModelVals[J] << "\n";
+            break;
             uint64_t N = ModelVals[J].getZExtValue(); 
-            if (!ModelVals[J].isNegative() || N != 1) {
-              if (ModelVals[J].isNegative()) {
-                // TODO: Multiple solutions
-                break;
-              }
+            if (ModelVals[J].isNegative() || N == 0) {
+              break;
+            }
+            N -= 1;
+            //llvm::outs() << N << "\n";
+            if (N < Inputs2.size()) {
               RHS = Inputs2[N];
               return EC;
             }
@@ -216,9 +289,11 @@ private:
         }
       } else {
         llvm::outs() << "UNSAT\n";
+        RHS = Inputs2[0];
+        return EC;
       }
     }
-    if (false && InferNop) {
+    if (true && InferNop) {
       for (auto I : Inputs) {
         if (I->Width == 1 &&
             (I->K == Inst::Const || I->K == Inst::UntypedConst))
