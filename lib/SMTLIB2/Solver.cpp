@@ -20,6 +20,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 #include "souper/SMTLIB2/Solver.h"
@@ -43,6 +44,12 @@ STATISTIC(Unsats, "Number of unsatisfiable SMT queries");
 SMTLIBSolver::~SMTLIBSolver() {}
 
 namespace {
+
+double getWallTime() {
+  sys::TimeValue now(0,0),user(0,0),sys(0,0);
+  sys::Process::GetTimeUsage(now,user,sys);
+  return (now.seconds() + (double) now.nanoseconds() * 1e-9);
+}
 
 // Bare bones SMT-LIB parser; enough to parse a get-value response.
 struct SMTLIBParser {
@@ -258,7 +265,10 @@ public:
     }
     ::close(OutputFD);
 
+    double Start = getWallTime();
     int ExitCode = Prog(Args, InputPath, OutputPath, Timeout);
+    double Elapsed = getWallTime() - Start;
+    llvm::outs() << "Solver took: " << Elapsed << "\n";
 
     if (Keep) {
       llvm::errs() << "Solver input saved to " << InputPath << '\n';
