@@ -282,10 +282,14 @@ private:
         EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
                                       &ModelVals, Timeout);
         if (EC)
-          continue;
-
-        if (!IsSat)
           return EC;
+
+        if (!IsSat) {
+          llvm::outs() << "UNSAT\n";
+          return EC;
+        } else {
+          llvm::outs() << "SAT\n";
+        }
 
       }
 
