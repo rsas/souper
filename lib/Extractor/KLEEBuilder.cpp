@@ -875,12 +875,18 @@ void ExprBuilder::getBlockPCPhiPaths(
 // Return an expression which must be proven valid for the candidate to apply.
 CandidateExpr souper::GetCandidateExprForReplacement(
     const BlockPCs &BPCs, const std::vector<InstMapping> &PCs,
-    InstMapping Mapping) {
+    InstMapping Mapping, bool Negate) {
 
   CandidateExpr CE;
   ExprBuilder EB(CE.Arrays, CE.ArrayVars);
 
-  ref<Expr> Cons = EB.getInstMapping(Mapping);
+  ref<Expr> LHS = EB.get(Mapping.LHS);
+  ref<Expr> RHS = EB.get(Mapping.RHS);
+  ref<Expr> Cons;
+  if (Negate)
+    Cons = NeExpr::create(LHS, RHS);
+  else
+    Cons = EqExpr::create(LHS, RHS);
   ref<Expr> Ante = klee::ConstantExpr::alloc(1, 1);
   for (const auto &PC : PCs) {
     Ante = AndExpr::create(Ante, EB.getInstMapping(PC));
@@ -892,7 +898,6 @@ CandidateExpr souper::GetCandidateExprForReplacement(
   }
 
   CE.E = Expr::createImplies(Ante, Cons);
-  //CE.E = AndExpr::create(Ante, Cons);
 
   return CE;
 }
@@ -904,12 +909,11 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
   std::string SMTStr;
   llvm::raw_string_ostream SMTSS(SMTStr);
   ConstraintManager Manager;
-  CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
+  CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping, Negate);
   Query KQuery(Manager, CE.E);
   ExprSMTLIBPrinter Printer;
   if (Negate) {
     //KQuery.expr->dump();
-    KQuery.expr = Expr::createIsZero(KQuery.expr);
   } else {
     //Expr::createIsZero(KQuery.expr)->dump();
   }

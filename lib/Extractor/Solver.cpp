@@ -104,9 +104,10 @@ private:
       return New;
     } else if (I->K == Inst::Phi) {
       // Create phi copy
-      Inst *New = IC.getPhi(IC.createBlock(I->B->Number), Ops);
-      VarMap[I] = New;
-      return New;
+      //Inst *New = IC.getPhi(IC.createBlock(I->B->Number), Ops);
+      //VarMap[I] = New;
+      //return New;
+      return I;
     } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
       return I;
     } else {
@@ -215,15 +216,9 @@ private:
         // Create LHS and RHS copies here
         for (int Index = 1; Index < Bucket.size(); ++Index) {
           std::map<Inst *, Inst *> VarMap;
-          //ReplacementContext Context;
-          //Inst *NewLHS = LHS;
-          //PrintReplacementRHS(llvm::outs(), NewLHS, Context);
           Inst *NewLHS = getInstCopy(LHS, IC, VarMap);
           Inst *NewRHS = getInstCopy(Bucket[Index], IC, VarMap);
-          //Inst *NewRHS = Inputs2[Index];
-          //PrintReplacementRHS(llvm::outs(), NewRHS, Context);
           RHSSel = IC.getInst(Inst::And, 1, { RHSSel, IC.getInst(Inst::Ne, LHS->Width, { NewLHS, NewRHS } ) } );
-          //RHSSel = IC.getInst(Inst::Or, 1, { RHSSel, IC.getInst(Inst::Eq, LHS->Width, { LHS, Inputs2[Index] } ) } );
           for (const auto PC : PCs) {
             InstMapping NewPC(getInstCopy(PC.LHS, IC, VarMap), getInstCopy(PC.RHS, IC, VarMap));
             NewPCs.push_back(NewPC);
@@ -273,7 +268,7 @@ private:
         std::vector<Inst *> ModelInsts;
         std::vector<llvm::APInt> ModelVals;
         InstMapping Mapping(LHSVar, RHSSel);
-        std::string Query = BuildQuery(BPCs, NewPCs, Mapping, 0);
+        std::string Query = BuildQuery(BPCs, NewPCs, Mapping, 0, false);
         //std::string Query = BuildQuery(BPCs, NewPCs, Mapping,
         //                               &ModelInsts, /*Negate=*/false);
         //std::string Query = BuildQuery(BPCs, PCs, Mapping,
