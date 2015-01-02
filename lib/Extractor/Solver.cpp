@@ -95,7 +95,7 @@ private:
     std::vector<Inst *> Ops;
     for (auto Op : I->Ops)
       Ops.push_back(getInstCopy(Op, IC, VarMap));
-
+      
     if (I->K == Inst::Var) {
       // Create var copy
       StringRef Name;
@@ -216,9 +216,9 @@ private:
         for (int Index = 1; Index < Bucket.size(); ++Index) {
           std::map<Inst *, Inst *> VarMap;
           //ReplacementContext Context;
-          Inst *NewLHS = getInstCopy(LHS, IC, VarMap);
           //Inst *NewLHS = LHS;
           //PrintReplacementRHS(llvm::outs(), NewLHS, Context);
+          Inst *NewLHS = getInstCopy(LHS, IC, VarMap);
           Inst *NewRHS = getInstCopy(Bucket[Index], IC, VarMap);
           //Inst *NewRHS = Inputs2[Index];
           //PrintReplacementRHS(llvm::outs(), NewRHS, Context);
@@ -279,8 +279,9 @@ private:
         //std::string Query = BuildQuery(BPCs, PCs, Mapping,
         //                               &ModelInsts, /*Negate=*/false);
         bool IsSat;
-        EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
-                                      &ModelVals, Timeout);
+        //EC = SMTSolver->isSatisfiable(Query, IsSat, ModelInsts.size(),
+        //                              &ModelVals, Timeout);
+        EC = SMTSolver->isSatisfiable(Query, IsSat, 0, 0, Timeout);
         if (EC)
           return EC;
 
