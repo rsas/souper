@@ -84,14 +84,19 @@ set(KLEE_EXPR_FILES
   third_party/klee/lib/Expr/Updates.cpp
 )
 
+add_library(kleeExpr STATIC
+  ${KLEE_EXPR_FILES}
+)
+
 include_directories(include third_party/klee/lib/Solver)
 
 set(KLEE_SOLVER_FILES
+  third_party/klee/lib/Basic/Statistics.cpp
+  third_party/klee/lib/Solver/ConstantDivision.cpp
   third_party/klee/lib/Solver/Solver.cpp
-)
-
-add_library(kleeExpr STATIC
-  ${KLEE_EXPR_FILES}
+  third_party/klee/lib/Solver/SolverStats.cpp
+  third_party/klee/lib/Solver/STPBuilder.cpp
+  third_party/klee/lib/Support/Timer.cpp
 )
 
 add_library(kleeSolver STATIC
@@ -266,21 +271,21 @@ set_target_properties(extractor_tests inst_tests parser_tests
   PROPERTIES COMPILE_FLAGS "${GTEST_CXXFLAGS} ${LLVM_CXXFLAGS}")
 
 target_link_libraries(kleeExpr ${LLVM_LIBS} ${LLVM_LDFLAGS})
-target_link_libraries(kleeSolver ${LLVM_LIBS} ${LLVM_LDFLAGS})
+target_link_libraries(kleeSolver kleeExpr ${LLVM_LIBS} ${LLVM_LDFLAGS} ${STP_LIBRARY})
 target_link_libraries(souperClangTool souperExtractor souperTool ${CLANG_LIBS} ${LLVM_LIBS} ${LLVM_LDFLAGS})
-target_link_libraries(souperExtractor souperInst kleeExpr)
+target_link_libraries(souperExtractor souperInst kleeExpr kleeSolver)
 target_link_libraries(souperInst ${LLVM_LIBS} ${LLVM_LDFLAGS})
 target_link_libraries(souperKVStore ${LLVM_LIBS} ${LLVM_LDFLAGS})
 target_link_libraries(souperParser souperInst ${LLVM_LIBS} ${LLVM_LDFLAGS})
 target_link_libraries(souperSMTLIB2 ${LLVM_LIBS} ${LLVM_LDFLAGS})
 target_link_libraries(souperTool souperExtractor souperSMTLIB2)
-target_link_libraries(souperPass ${PASS_LDFLAGS} ${HIREDIS_LIBRARY} ${STP_LIBRARY})
-target_link_libraries(souper souperExtractor souperKVStore souperParser souperSMTLIB2 souperTool kleeExpr kleeSolver ${HIREDIS_LIBRARY} ${STP_LIBRARY})
+target_link_libraries(souperPass ${PASS_LDFLAGS} ${HIREDIS_LIBRARY})
+target_link_libraries(souper souperExtractor souperKVStore souperParser souperSMTLIB2 souperTool kleeExpr kleeSolver ${HIREDIS_LIBRARY})
 target_link_libraries(internal-solver-test souperSMTLIB2)
 target_link_libraries(lexer-test souperParser)
 target_link_libraries(parser-test souperParser)
-target_link_libraries(souper-check souperTool souperExtractor souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY} ${STP_LIBRARY})
-target_link_libraries(clang-souper souperClangTool souperExtractor souperKVStore souperParser souperSMTLIB2 souperTool kleeExpr kleeSolver ${CLANG_LIBS} ${LLVM_LIBS} ${LLVM_LDFLAGS} ${HIREDIS_LIBRARY} ${STP_LIBRARY})
+target_link_libraries(souper-check souperTool souperExtractor souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY})
+target_link_libraries(clang-souper souperClangTool souperExtractor souperKVStore souperParser souperSMTLIB2 souperTool kleeExpr kleeSolver ${CLANG_LIBS} ${LLVM_LIBS} ${LLVM_LDFLAGS} ${HIREDIS_LIBRARY})
 target_link_libraries(extractor_tests souperExtractor ${GTEST_LIBS})
 target_link_libraries(inst_tests souperInst ${GTEST_LIBS})
 target_link_libraries(parser_tests souperParser ${GTEST_LIBS})
@@ -304,7 +309,7 @@ if(NOT GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
   set_target_properties(souperweb-backend
     PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
 
-  target_link_libraries(souperweb-backend souperTool souperExtractor souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY} ${STP_LIBRARY})
+  target_link_libraries(souperweb-backend souperTool souperExtractor souperKVStore souperSMTLIB2 souperParser souperInst ${HIREDIS_LIBRARY})
 
   add_custom_target(souperweb ALL COMMAND ${GO_EXECUTABLE} build -o ${CMAKE_BINARY_DIR}/souperweb ${CMAKE_SOURCE_DIR}/tools/souperweb.go
                                   COMMENT "Building souperweb")

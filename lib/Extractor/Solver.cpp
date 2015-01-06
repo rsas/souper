@@ -14,6 +14,8 @@
 
 #define DEBUG_TYPE "souper"
 
+#include "klee/Constraints.h"
+#include "klee/Solver.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Instruction.h"
@@ -242,17 +244,40 @@ public:
 class KleeSolver : public Solver {
   std::unique_ptr<Solver> UnderlyingSolver;
   unsigned Timeout;
+  klee::Solver *S;
 
 public:
   KleeSolver(std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout)
       : UnderlyingSolver(std::move(UnderlyingSolver)), Timeout(Timeout) {
+    S = new klee::STPSolver(/*UseForkedCoreSolver*/false, /*CoreSolverOptimizeDivides*/false);
+    S->setCoreSolverTimeout(Timeout);
   }
 
   std::error_code infer(const BlockPCs &BPCs,
                         const std::vector<InstMapping> &PCs,
                         Inst *LHS, Inst *&RHS, InstContext &IC) {
-    std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
-    return EC;
+    assert(LHS->Width == 1);
+    std::error_code EC;
+    std::vector<Inst *>Guesses { IC.getConst(APInt(1, true)),
+                                 IC.getConst(APInt(1, false)) };
+    for (auto I : Guesses) {
+      InstMapping Mapping(LHS, I);
+
+      CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
+      klee::ConstraintManager Manager;
+      klee::STPSolver::Validity IsSat;
+      S->evaluate(klee::Query(Manager, CE.E), IsSat);
+
+      if (IsSat == klee::STPSolver::Validity::Unknown)
+        return std::make_error_code(std::errc::protocol_error);
+
+      if (IsSat == klee::STPSolver::Validity::False) {
+        RHS = I;
+        return EC;
+      }
+    }
+
+    return UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
   }
 
   std::error_code isValid(const BlockPCs &BPCs,

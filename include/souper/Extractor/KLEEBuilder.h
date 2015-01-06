@@ -17,6 +17,7 @@
 
 #include "klee/Expr.h"
 #include "klee/util/Ref.h"
+#include "klee/Solver.h"
 #include "souper/Extractor/Candidates.h"
 #include <memory>
 #include <vector>

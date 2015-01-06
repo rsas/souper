@@ -14,10 +14,8 @@
 
 #include "souper/Extractor/KLEEBuilder.h"
 
-#include "klee/Expr.h"
 #include "klee/util/ExprPPrinter.h"
 #include "klee/util/ExprSMTLIBPrinter.h"
-#include "klee/util/Ref.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"

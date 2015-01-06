@@ -15,7 +15,6 @@
 #ifndef SOUPER_EXTRACTOR_SOLVER_H
 #define SOUPER_EXTRACTOR_SOLVER_H
 
-#include "klee/Solver.h"
 #include "llvm/ADT/APInt.h"
 #include "souper/KVStore/KVStore.h"
 #include "souper/Tool/CandidateMapUtils.h"
