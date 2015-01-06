@@ -239,6 +239,35 @@ public:
 
 };
 
+class KleeSolver : public Solver {
+  std::unique_ptr<Solver> UnderlyingSolver;
+  unsigned Timeout;
+
+public:
+  KleeSolver(std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout)
+      : UnderlyingSolver(std::move(UnderlyingSolver)), Timeout(Timeout) {
+  }
+
+  std::error_code infer(const BlockPCs &BPCs,
+                        const std::vector<InstMapping> &PCs,
+                        Inst *LHS, Inst *&RHS, InstContext &IC) {
+    std::error_code EC = UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
+    return EC;
+  }
+
+  std::error_code isValid(const BlockPCs &BPCs,
+                          const std::vector<InstMapping> &PCs,
+                          InstMapping Mapping, bool &IsValid,
+                          std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
+    return UnderlyingSolver->isValid(BPCs, PCs, Mapping, IsValid, Model);
+  }
+
+  std::string getName() {
+    return UnderlyingSolver->getName() + " + klee solver";
+  }
+
+};
+
 }
 
 namespace souper {
@@ -260,6 +289,12 @@ std::unique_ptr<Solver> createExternalCachingSolver(
     std::unique_ptr<Solver> UnderlyingSolver, KVStore *KV) {
   return std::unique_ptr<Solver>(
       new ExternalCachingSolver(std::move(UnderlyingSolver), KV));
+}
+
+std::unique_ptr<Solver> createKleeSolver(
+    std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout) {
+  return std::unique_ptr<Solver>(
+      new KleeSolver(std::move(UnderlyingSolver), Timeout));
 }
 
 }

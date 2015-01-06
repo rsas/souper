@@ -72,6 +72,11 @@ static llvm::cl::opt<bool> ExternalCache(
   llvm::cl::desc("Use external Redis-based cache (default=false)"),
   llvm::cl::init(false));
 
+static llvm::cl::opt<bool> KleeSolver(
+  "souper-klee-solver",
+  llvm::cl::desc("Use Klee solver (default=false)"),
+  llvm::cl::init(false));
+
 static llvm::cl::opt<int> SolverTimeout(
   "solver-timeout",
   llvm::cl::desc("Solver timeout in seconds (default=no timeout)"),
@@ -81,6 +86,9 @@ static std::unique_ptr<Solver> GetSolverFromArgs(KVStore *&KV) {
   std::unique_ptr<SMTLIBSolver> US = GetUnderlyingSolverFromArgs();
   if (!US) return NULL;
   std::unique_ptr<Solver> S = createBaseSolver (std::move(US), SolverTimeout);
+  if (KleeSolver) {
+    S = createKleeSolver (std::move(S), SolverTimeout);
+  }
   if (ExternalCache) {
     KV = new KVStore;
     S = createExternalCachingSolver (std::move(S), KV);

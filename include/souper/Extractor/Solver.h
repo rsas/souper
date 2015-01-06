@@ -15,6 +15,7 @@
 #ifndef SOUPER_EXTRACTOR_SOLVER_H
 #define SOUPER_EXTRACTOR_SOLVER_H
 
+#include "klee/Solver.h"
 #include "llvm/ADT/APInt.h"
 #include "souper/KVStore/KVStore.h"
 #include "souper/Tool/CandidateMapUtils.h"
@@ -45,6 +46,8 @@ std::unique_ptr<Solver> createMemCachingSolver(
     std::unique_ptr<Solver> UnderlyingSolver);
 std::unique_ptr<Solver> createExternalCachingSolver(
     std::unique_ptr<Solver> UnderlyingSolver, KVStore *KV);
+std::unique_ptr<Solver> createKleeSolver(
+    std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout);
 
 }
 
