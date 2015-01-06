@@ -921,6 +921,7 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
   ExprSMTLIBPrinter Printer;
   Printer.setOutput(SMTSS);
   Printer.setQuery(KQuery);
+  //Expr::createIsZero(KQuery.expr)->dump();
   std::vector<const klee::Array *> Arrays;
   if (ModelVars) {
     for (unsigned I = 0; I != CE.ArrayVars.size(); ++I) {
@@ -941,6 +942,7 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
     PP->print(CE.E);
     SMTSS << '\n';
   }
+  //llvm::outs() << SMTSS.str();
 
   return SMTSS.str();
 }

@@ -45,8 +45,7 @@ std::unique_ptr<Solver> createMemCachingSolver(
     std::unique_ptr<Solver> UnderlyingSolver);
 std::unique_ptr<Solver> createExternalCachingSolver(
     std::unique_ptr<Solver> UnderlyingSolver, KVStore *KV);
-std::unique_ptr<Solver> createKleeSolver(
-    std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout);
+std::unique_ptr<Solver> createKleeSTPSolver(unsigned Timeout);
 
 }
 

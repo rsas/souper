@@ -241,15 +241,14 @@ public:
 
 };
 
-class KleeSolver : public Solver {
-  std::unique_ptr<Solver> UnderlyingSolver;
+class KleeSTPSolver : public Solver {
   unsigned Timeout;
   klee::Solver *S;
 
 public:
-  KleeSolver(std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout)
-      : UnderlyingSolver(std::move(UnderlyingSolver)), Timeout(Timeout) {
-    S = new klee::STPSolver(/*UseForkedCoreSolver*/false, /*CoreSolverOptimizeDivides*/false);
+  KleeSTPSolver(unsigned Timeout)
+      : Timeout(Timeout) {
+    S = new klee::STPSolver(/*UseForkedCoreSolver*/true, /*CoreSolverOptimizeDivides*/true);
     S->setCoreSolverTimeout(Timeout);
   }
 
@@ -265,30 +264,47 @@ public:
 
       CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
       klee::ConstraintManager Manager;
-      klee::STPSolver::Validity IsSat;
-      S->evaluate(klee::Query(Manager, CE.E), IsSat);
+      bool IsSat;
+      klee::Query KQuery = klee::Query(Manager, CE.E);
+      // TODO: Simplify constraints, i.e., use ConstraintManaged instead of PC
+      //(KQuery.negateExpr()).expr->dump();
+      bool Ret = S->mustBeFalse(KQuery.negateExpr(), IsSat);
 
-      if (IsSat == klee::STPSolver::Validity::Unknown)
-        return std::make_error_code(std::errc::protocol_error);
+      if (!Ret)
+        return std::make_error_code(std::errc::timed_out);
 
-      if (IsSat == klee::STPSolver::Validity::False) {
+      if (IsSat) {
         RHS = I;
         return EC;
       }
     }
 
-    return UnderlyingSolver->infer(BPCs, PCs, LHS, RHS, IC);
+    RHS = 0;
+    return EC;
   }
 
   std::error_code isValid(const BlockPCs &BPCs,
                           const std::vector<InstMapping> &PCs,
                           InstMapping Mapping, bool &IsValid,
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
-    return UnderlyingSolver->isValid(BPCs, PCs, Mapping, IsValid, Model);
+    // TODO: Model support
+    CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
+    klee::ConstraintManager Manager;
+    bool IsSat;
+    klee::Query KQuery = klee::Query(Manager, CE.E);
+    // TODO: Simplify constraints, i.e., use ConstraintManaged instead of PC
+    //(KQuery.negateExpr()).expr->dump();
+    bool Ret = S->mustBeFalse(KQuery.negateExpr(), IsSat);
+
+    if (!Ret)
+      return std::make_error_code(std::errc::timed_out);
+
+    IsValid = IsSat;
+    return std::error_code();
   }
 
   std::string getName() {
-    return UnderlyingSolver->getName() + " + klee solver";
+    return "Klee STP";
   }
 
 };
@@ -316,10 +332,8 @@ std::unique_ptr<Solver> createExternalCachingSolver(
       new ExternalCachingSolver(std::move(UnderlyingSolver), KV));
 }
 
-std::unique_ptr<Solver> createKleeSolver(
-    std::unique_ptr<Solver> UnderlyingSolver, unsigned Timeout) {
-  return std::unique_ptr<Solver>(
-      new KleeSolver(std::move(UnderlyingSolver), Timeout));
+std::unique_ptr<Solver> createKleeSTPSolver(unsigned Timeout) {
+  return std::unique_ptr<Solver>(new KleeSTPSolver(Timeout));
 }
 
 }
