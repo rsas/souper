@@ -102,6 +102,35 @@ find_library(HIREDIS_LIBRARY
   PATHS
   third_party/hiredis/install/lib)
 
+if(NOT STP_ROOT)
+  message(FATAL_ERROR "STP_ROOT option not set. Use -DSTP_ROOT=/path/to/stp/")
+endif()
+
+message(STATUS "STP root set to ${STP_ROOT}")
+
+find_path(STP_INCLUDE_DIR
+  NAMES
+  stp/c_interface.h
+  PATHS
+  ${STP_ROOT}/include
+  NO_DEFAULT_PATH)
+
+if(NOT STP_INCLUDE_DIR)
+  message(FATAL_ERROR "Could not find stp/c_interface.h in ${STP_ROOT}/include")
+endif()
+
+find_library(STP_LIBRARY
+  NAMES
+  libstp.a
+  PATHS
+  ${STP_ROOT}/lib
+  ${STP_ROOT}/build/lib
+  NO_DEFAULT_PATH)
+
+if(NOT STP_LIBRARY)
+  message(FATAL_ERROR "Could not find libstp.a in ${STP_ROOT}/lib or ${STP_ROOT}/build/lib")
+endif()
+
 set(SOUPER_CLANG_TOOL_FILES
   lib/ClangTool/Actions.cpp
   include/souper/ClangTool/Actions.h
