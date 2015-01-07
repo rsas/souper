@@ -248,7 +248,7 @@ class KleeSTPSolver : public Solver {
 public:
   KleeSTPSolver(unsigned Timeout)
       : Timeout(Timeout) {
-    S = new klee::STPSolver(/*UseForkedCoreSolver*/true, /*CoreSolverOptimizeDivides*/true);
+    S = new klee::STPSolver(/*UseForkedCoreSolver*/false, /*CoreSolverOptimizeDivides*/true);
     S->setCoreSolverTimeout(Timeout);
   }
 

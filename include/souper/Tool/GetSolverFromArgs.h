@@ -74,8 +74,8 @@ static llvm::cl::opt<bool> ExternalCache(
 
 static llvm::cl::opt<bool> KleeSTPSolver(
   "souper-klee-stp-solver",
-  llvm::cl::desc("Use Klee STP solver (default=false)"),
-  llvm::cl::init(false));
+  llvm::cl::desc("Use Klee STP solver (default=true)"),
+  llvm::cl::init(true));
 
 static llvm::cl::opt<int> SolverTimeout(
   "solver-timeout",

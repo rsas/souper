@@ -128,6 +128,7 @@ ref<Expr> ExprBuilder::makeSizedArrayRead(unsigned Width, StringRef Name,
   ArrayVars.push_back(Origin);
 
   UpdateList UL(Arrays.back().get(), 0);
+
   return ReadExpr::create(UL, klee::ConstantExpr::alloc(0, Expr::Int32));
 }
 
@@ -560,8 +561,11 @@ std::vector<ref<Expr>> ExprBuilder::getBlockPredicates(Inst *I) {
     return BlockPredMap[I->B];
   std::vector<ref<Expr>> PredExpr;
   const std::vector<Inst *> &Ops = I->orderedOps();
-  for (unsigned J = 0; J < Ops.size()-1; ++J)
+  for (unsigned J = 0; J < Ops.size()-1; ++J) {
+    //ref<Expr> Pred = EqExpr::create(makeSizedArrayRead(32, "blockpred", 0), klee::ConstantExpr::create(1, 32));
+    //PredExpr.push_back(Pred);
     PredExpr.push_back(makeSizedArrayRead(1, "blockpred", 0));
+  }
   BlockPredMap[I->B] = PredExpr;
   return PredExpr;
 }
