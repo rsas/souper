@@ -159,7 +159,7 @@ cont:
 )m"));
 
   EXPECT_TRUE(hasCandidateExpr(
-      "(Ult N0:(Read w32 0 p) (Select w32 (Eq 1 (Read w32 0 blockpred)) (Add w32 N0 "
+      "(Ult N0:(Read w32 0 p) (Select w32 (Eq 1 (Read w8 0 blockpred)) (Add w32 N0 "
       "N1:(Read w32 0 q)) (Mul w32 N0 N1)))"));
 }
 

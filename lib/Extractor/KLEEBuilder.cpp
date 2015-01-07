@@ -123,13 +123,23 @@ ref<Expr> ExprBuilder::makeSizedArrayRead(unsigned Width, StringRef Name,
     NameStr = ("a" + Name).str();
   else
     NameStr = Name;
-  Arrays.emplace_back(
-      new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, Width));
+  // FIXME
+  if (Width == 1)
+    Arrays.emplace_back(
+        new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, 8));
+  else
+    Arrays.emplace_back(
+        new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, Width));
   ArrayVars.push_back(Origin);
 
   UpdateList UL(Arrays.back().get(), 0);
 
-  return ReadExpr::create(UL, klee::ConstantExpr::alloc(0, Expr::Int32));
+  ref<Expr> Ret = ReadExpr::create(UL, klee::ConstantExpr::alloc(0, Expr::Int32));
+  // FIXME
+  if (Width == 1)
+    Ret = EqExpr::create(Ret, klee::ConstantExpr::create(1, 8));
+
+  return Ret;
 }
 
 ref<Expr> ExprBuilder::addnswUB(Inst *I) {
@@ -562,8 +572,6 @@ std::vector<ref<Expr>> ExprBuilder::getBlockPredicates(Inst *I) {
   std::vector<ref<Expr>> PredExpr;
   const std::vector<Inst *> &Ops = I->orderedOps();
   for (unsigned J = 0; J < Ops.size()-1; ++J) {
-    //ref<Expr> Pred = EqExpr::create(makeSizedArrayRead(32, "blockpred", 0), klee::ConstantExpr::create(1, 32));
-    //PredExpr.push_back(Pred);
     PredExpr.push_back(makeSizedArrayRead(1, "blockpred", 0));
   }
   BlockPredMap[I->B] = PredExpr;

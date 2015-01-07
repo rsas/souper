@@ -84,7 +84,7 @@ static llvm::cl::opt<int> SolverTimeout(
 
 static std::unique_ptr<Solver> GetSolverFromArgs(KVStore *&KV) {
   std::unique_ptr<SMTLIBSolver> US = GetUnderlyingSolverFromArgs();
-  if (!US && !KleeSTPSolver) return NULL;
+  if (!US) return NULL;
   std::unique_ptr<Solver> S;
   if (KleeSTPSolver)
     S = createKleeSTPSolver (SolverTimeout);
