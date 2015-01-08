@@ -192,7 +192,6 @@ private:
       }
 
       if (Cands.size()) {
-        llvm::outs() << Cands.size() << " cands\n";
         Inst *LHSVar = IC.getConst(APInt(1, 0));
         Inst *Ne = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[0]});
         Inst *RHSSel = IC.getInst(Inst::And, 1, { Ne, IC.getConst(APInt(1, 1)) });
@@ -209,8 +208,53 @@ private:
         if (EC)
           return EC;
 
+        // Filter out false positives using binary search
+        if (false && !IsSat) {
+          //llvm::outs() << Cands.size() << " cands\n";
+          size_t Left = 0;
+          size_t Right = Cands.size()-1;
+          size_t Mid = 0;
+          size_t Count = 0, Cycles = 0;
+          while (Left <= Right) {
+            Cycles++;
+            Mid = (Left + Right)/2;
+            //llvm::outs() << "[" << Left << ", " << Mid << "] -> ";
+            for (int Index = Left; Index <= Mid; ++Index) {
+              Count++;
+              if (Index == Left) {
+                Ne = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
+                RHSSel = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
+              } else {
+                RHSSel = IC.getInst(Inst::And, 1,
+                                    { RHSSel, IC.getInst(Inst::Ne, LHS->Width,
+                                                         { LHS, Cands[Index] } ) } );
+              }
+            }
+            InstMapping Mapping(LHSVar, RHSSel);
+            EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0, 0),
+                                          IsSat, 0, 0, Timeout);
+            if (EC) {
+              //llvm::outs() << "Error!\n";
+              return EC;
+            }
+            if (IsSat) {
+              //llvm::outs() << "SAT\n";
+              Left = Mid+1;
+            } else {
+              //llvm::outs() << "UNSAT\n";
+              if ((Mid-Left) > 0) {
+                Right = Mid;
+              } else {
+                //llvm::outs() << ", found in " << Cycles << " cycles out of " << Cands.size() << "\n";
+                RHS = Cands[Left];
+                return EC;
+              }
+            }
+          }
+        }
+
         // Filter out false positives linearly
-        if (!IsSat) {
+        if (true && !IsSat) {
           for (int Index = 1; Index < Cands.size(); ++Index) {
             RHSSel = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
             InstMapping Mapping(LHSVar, RHSSel);
