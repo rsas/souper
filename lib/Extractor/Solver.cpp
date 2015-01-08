@@ -193,81 +193,79 @@ private:
 
       if (Cands.size()) {
         Inst *LHSVar = IC.getConst(APInt(1, 0));
-        Inst *Ne = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[0]});
-        Inst *RHSSel = IC.getInst(Inst::And, 1, { Ne, IC.getConst(APInt(1, 1)) });
-        for (int Index = 1; Index < Cands.size(); ++Index) {
-          RHSSel = IC.getInst(Inst::And, 1,
-                              { RHSSel, IC.getInst(Inst::Ne, LHS->Width,
-                                                   { LHS, Cands[Index] } ) } );
-        }
+        //llvm::outs() << Cands.size() << " cands\n";
+        size_t Left = 0, Right = Cands.size()-1;
+        size_t Cycles = 0;
+        std::vector<std::pair<size_t, size_t>> Backtrack;
+        std::set<size_t> Tmp, TmpOne;
 
-        InstMapping Mapping(LHSVar, RHSSel);
-        bool IsSat;
-        EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0),
-                                      IsSat, 0, 0, Timeout);
-        if (EC)
-          return EC;
+        while (true) {
+          //llvm::outs() << "[" << Left << ", " << Right << "] -> ";
+          Inst *RHSSel = IC.getInst(Inst::Ne, 1, {LHS, Cands[Left]});
+          Tmp.insert(Left);
+          if (Left == Right) {
+            assert(TmpOne.insert(Left).second);
+          }
+          for (int Index = Left+1; Index <= Right; ++Index) {
+            Tmp.insert(Index);
+            RHSSel = IC.getInst(Inst::And, 1,
+                                { RHSSel, IC.getInst(Inst::Ne, 1,
+                                                     { LHS, Cands[Index] } ) } );
+          }
+          bool IsSat;
+          InstMapping Mapping(LHSVar, RHSSel);
+          EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0, 0),
+                                        IsSat, 0, 0, Timeout);
+          if (EC)
+            return EC;
+          // Initial query
+          if (IsSat && Right == Cands.size()-1)
+            break;
 
-        // Filter out false positives using binary search
-        if (false && !IsSat) {
-          //llvm::outs() << Cands.size() << " cands\n";
-          size_t Left = 0;
-          size_t Right = Cands.size()-1;
-          size_t Mid = 0;
-          size_t Count = 0, Cycles = 0;
-          while (Left <= Right) {
-            Cycles++;
-            Mid = (Left + Right)/2;
-            //llvm::outs() << "[" << Left << ", " << Mid << "] -> ";
-            for (int Index = Left; Index <= Mid; ++Index) {
-              Count++;
-              if (Index == Left) {
-                Ne = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
-                RHSSel = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
-              } else {
-                RHSSel = IC.getInst(Inst::And, 1,
-                                    { RHSSel, IC.getInst(Inst::Ne, LHS->Width,
-                                                         { LHS, Cands[Index] } ) } );
-              }
-            }
-            InstMapping Mapping(LHSVar, RHSSel);
-            EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0, 0),
-                                          IsSat, 0, 0, Timeout);
-            if (EC) {
-              //llvm::outs() << "Error!\n";
-              return EC;
-            }
-            if (IsSat) {
-              //llvm::outs() << "SAT\n";
-              Left = Mid+1;
-            } else {
-              //llvm::outs() << "UNSAT\n";
-              if ((Mid-Left) > 0) {
-                Right = Mid;
-              } else {
-                //llvm::outs() << ", found in " << Cycles << " cycles out of " << Cands.size() << "\n";
-                RHS = Cands[Left];
+          // Linear filterting
+          if (1 && !IsSat) {
+            for (int Index = 0; Index < Cands.size(); ++Index) {
+              RHSSel = IC.getInst(Inst::Ne, 1, {LHS, Cands[Index]});
+              InstMapping Mapping(LHSVar, RHSSel);
+              EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0, 0),
+                                            IsSat, 0, 0, Timeout);
+              if (EC)
+                return EC;
+              if (!IsSat) {
+                RHS = Cands[Index];
                 return EC;
               }
             }
+            // Not found
+            return EC;
           }
-        }
 
-        // Filter out false positives linearly
-        if (true && !IsSat) {
-          for (int Index = 1; Index < Cands.size(); ++Index) {
-            RHSSel = IC.getInst(Inst::Ne, LHS->Width, {LHS, Cands[Index]});
-            InstMapping Mapping(LHSVar, RHSSel);
-            EC = SMTSolver->isSatisfiable(BuildQuery(BPCs, PCs, Mapping, 0, 0),
-                                          IsSat, 0, 0, Timeout);
-            if (EC)
-              return EC;
-            if (!IsSat) {
-              RHS = Cands[Index];
+          Cycles++;
+
+          // Binary searched-based filtering
+          if (IsSat) {
+            //llvm::outs() << "SAT\n";
+            assert(Backtrack.size());
+            Left = Backtrack.back().first;
+            Right = Backtrack.back().second;
+            Backtrack.pop_back();
+          } else {
+            if (Left < Right) {
+              //llvm::outs() << "UNSAT\n";
+              // Store the right interval for backtracking
+              size_t Mid = (Left + Right)/2;
+              Backtrack.push_back(std::make_pair(Mid+1, Right));
+              Right = Mid;
+            } else {
+              //llvm::outs() << "UNSAT, found opt in " << Cycles << " cycles out of " << Cands.size() << "\n";
+              RHS = Cands[Left];
               return EC;
             }
           }
+          assert(Left <= Right);
         }
+        assert(Tmp.size() == Cands.size());
+        assert(!Backtrack.size());
       }
     }
 
