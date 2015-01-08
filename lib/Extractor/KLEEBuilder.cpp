@@ -123,23 +123,13 @@ ref<Expr> ExprBuilder::makeSizedArrayRead(unsigned Width, StringRef Name,
     NameStr = ("a" + Name).str();
   else
     NameStr = Name;
-  // FIXME
-  if (Width == 1)
-    Arrays.emplace_back(
-        new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, 8));
-  else
-    Arrays.emplace_back(
-        new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, Width));
+  Arrays.emplace_back(
+      new Array(ArrayNames.makeName(NameStr), 1, 0, 0, Expr::Int32, Width));
   ArrayVars.push_back(Origin);
 
   UpdateList UL(Arrays.back().get(), 0);
 
-  ref<Expr> Ret = ReadExpr::create(UL, klee::ConstantExpr::alloc(0, Expr::Int32));
-  // FIXME
-  if (Width == 1)
-    Ret = EqExpr::create(Ret, klee::ConstantExpr::create(1, 8));
-
-  return Ret;
+  return ReadExpr::create(UL, klee::ConstantExpr::alloc(0, Expr::Int32));
 }
 
 ref<Expr> ExprBuilder::addnswUB(Inst *I) {

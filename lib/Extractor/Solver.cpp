@@ -248,8 +248,6 @@ class KleeSTPSolver : public Solver {
 public:
   KleeSTPSolver(unsigned Timeout)
       : Timeout(Timeout) {
-    S = new klee::STPSolver(/*UseForkedCoreSolver*/false, /*CoreSolverOptimizeDivides*/true);
-    S->setCoreSolverTimeout(Timeout);
   }
 
   std::error_code infer(const BlockPCs &BPCs,
@@ -260,8 +258,9 @@ public:
     std::vector<Inst *>Guesses { IC.getConst(APInt(1, true)),
                                  IC.getConst(APInt(1, false)) };
     for (auto I : Guesses) {
+      S = new klee::STPSolver(/*UseForkedCoreSolver*/true, /*CoreSolverOptimizeDivides*/true);
+      S->setCoreSolverTimeout(Timeout);
       InstMapping Mapping(LHS, I);
-
       CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
       klee::ConstraintManager Manager;
       bool IsSat;
@@ -269,6 +268,7 @@ public:
       // TODO: Simplify constraints, i.e., use ConstraintManaged instead of PC
       //(KQuery.negateExpr()).expr->dump();
       bool Ret = S->mustBeFalse(KQuery.negateExpr(), IsSat);
+      delete S;
 
       if (!Ret)
         return std::make_error_code(std::errc::timed_out);
@@ -287,6 +287,8 @@ public:
                           const std::vector<InstMapping> &PCs,
                           InstMapping Mapping, bool &IsValid,
                           std::vector<std::pair<Inst *, llvm::APInt>> *Model) {
+    S = new klee::STPSolver(/*UseForkedCoreSolver*/true, /*CoreSolverOptimizeDivides*/true);
+    S->setCoreSolverTimeout(Timeout);
     // TODO: Model support
     CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping);
     klee::ConstraintManager Manager;
@@ -295,6 +297,7 @@ public:
     // TODO: Simplify constraints, i.e., use ConstraintManaged instead of PC
     //(KQuery.negateExpr()).expr->dump();
     bool Ret = S->mustBeFalse(KQuery.negateExpr(), IsSat);
+    delete S;
 
     if (!Ret)
       return std::make_error_code(std::errc::timed_out);
