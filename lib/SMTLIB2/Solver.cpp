@@ -268,7 +268,7 @@ public:
     double Start = getWallTime();
     int ExitCode = Prog(Args, InputPath, OutputPath, Timeout);
     double Elapsed = getWallTime() - Start;
-    llvm::outs() << "Solver took: " << Elapsed << "\n";
+    //llvm::outs() << "Solver took: " << Elapsed << "\n";
 
     if (Keep) {
       llvm::errs() << "Solver input saved to " << InputPath << '\n';

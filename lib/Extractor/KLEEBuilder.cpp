@@ -912,7 +912,7 @@ std::string souper::BuildQuery(const BlockPCs &BPCs,
   CandidateExpr CE = GetCandidateExprForReplacement(BPCs, PCs, Mapping, Negate);
   Query KQuery(Manager, CE.E);
   ExprSMTLIBPrinter Printer;
-  Expr::createIsZero(KQuery.expr)->dump();
+  //Expr::createIsZero(KQuery.expr)->dump();
   Printer.setOutput(SMTSS);
   Printer.setQuery(KQuery);
   std::vector<const klee::Array *> Arrays;
