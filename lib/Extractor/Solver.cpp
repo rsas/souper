@@ -181,17 +181,28 @@ private:
         getInputs(Op, Inputs);
 
     if (true && InferNop) {
-      std::vector<Inst *> Cands;
+      std::vector<std::vector<Inst *>> Buckets;
+      std::vector<Inst *> Tmp;
       for (auto I : Inputs) {
         if (I->Width == 1 &&
             (I->K == Inst::Const || I->K == Inst::UntypedConst))
           continue;
         if (LHS->Width != I->Width)
           continue;
-        Cands.push_back(I);
+        Tmp.push_back(I);
+        if (Tmp.size() == 30) {
+          Buckets.push_back(Tmp);
+          Tmp.clear();
+        }
+      }
+      if (Tmp.size()) {
+        Buckets.push_back(Tmp);
+        Tmp.clear();
       }
 
-      if (Cands.size()) {
+      for (auto Cands : Buckets) {
+        assert(Cands.size());
+
         Inst *LHSVar = IC.getConst(APInt(1, 0));
         //llvm::outs() << Cands.size() << " cands\n";
         size_t Left = 0, Right = Cands.size()-1;
