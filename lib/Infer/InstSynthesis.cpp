@@ -418,23 +418,23 @@ Inst *InstSynthesis::createLocVarInst(const LocVar &Loc, InstContext &IC) {
 }
 
 void InstSynthesis::setInvalidWirings() {
-  // Width mismatches
+  // Forbid width mismatches
   std::vector<LocInst> Tmp(P.begin(), P.end());
   Tmp.push_back(O);
-  // Inputs
+  // Compare inputs
   for (auto const &In : I) {
     unsigned Width = CompInstMap[In.first]->Width;
-    // Compare with component inputs and the output
+    // with component inputs and the output
     for (auto const &L_x : Tmp) {
       if (Width == CompInstMap[L_x.first]->Width)
         continue;
       InvalidWirings.insert(std::make_pair(In, L_x));
     }
   }
-  // Outputs
+  // Compare outputs
   for (auto const &L_y : R) {
     unsigned Width = CompInstMap[L_y.first]->Width;
-    // Compare with component inputs and the output
+    // with component inputs and the output
     for (auto const &L_x : Tmp) {
       // Don't constrain yourself
       if (L_y.first.first == L_x.first.first)
@@ -465,6 +465,10 @@ void InstSynthesis::setInvalidWirings() {
   for (unsigned J = 0; J < P.size(); ++J)
     for (unsigned K = J+1; K < P.size(); ++K)
       InvalidWirings.insert(std::make_pair(P[J], P[K]));
+  // Similarly, don't wire an input with other inputs(s) explicitly
+  for (unsigned J = 0; J < I.size(); ++J)
+    for (unsigned K = J+1; K < I.size(); ++K)
+      InvalidWirings.insert(std::make_pair(I[J], I[K]));
 }
 
 Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
