@@ -180,8 +180,6 @@ private:
   unsigned DefaultInstWidth = 0;
   /// LocInst width is fixed
   unsigned const LocInstWidth = 32;
-  /// Constant synthesis mode
-  bool DoConstSynthesis = false;
   /// A mapping from a location variable's string representation to its location.
   /// Required during model parsing
   std::map<std::string, LocInst> LocInstMap;
@@ -213,11 +211,13 @@ private:
   /// Create a fresh location variable
   Inst *createLocVarInst(const LocVar &Loc, InstContext &IC);
 
+  /// Set particular wirings to be invalid (e.g. width mismatches).
+  /// These invalid wirings are not encoded as constraints, they are
+  /// simply skipped during constraint creation process
+  void setInvalidWirings();
+
   /// Add all synthesis constraints as path conditions
   void addConstraints(std::vector<InstMapping> &PCs, InstContext &IC);
-
-  /// Don't wire location variables if components' widths don't match
-  Inst *getWidthConstraint(InstContext &IC);
 
   /// Every line in the program has at most one component.
   /// Don't wire semantically invalid variable locations,
@@ -288,6 +288,7 @@ private:
   LocVar getLocVarFromStr(const std::string &Str);
   std::vector<LocVar> getOpLocs(const LocVar &Loc);
   std::vector<std::string> splitString(const char *S, char Del=',');
+  bool isWiringInvalid(const LocInst &Left, const LocInst &Right);
 
 };
 
