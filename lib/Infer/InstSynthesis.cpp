@@ -831,6 +831,8 @@ LocVar InstSynthesis::parseWiringModel(
   assert(ModelVals.size() && "there must models to parse");
   unsigned Counter = 0;
   LocVar OutLoc;
+  bool OutLocSet = false;
+  unsigned OutWidth = CompInstMap[O.first]->Width;
 
   for (unsigned J = 0; J != ModelInsts.size(); ++J) {
     auto Name = ModelInsts[J]->Name;
@@ -839,15 +841,28 @@ LocVar InstSynthesis::parseWiringModel(
       LocVar Loc = getLocVarFromStr(Name.substr(LOC_PREFIX.size()));
       unsigned Line = (unsigned)ModelVals[J].getZExtValue();
       if (ProgramWiring.count(Line)) {
-        auto const &VarMap = ProgramWiring[Line];
-        // Is it output? If yes, there should be only one component output
-        // or any input in that Line. Just grab any. Else, check if there is
-        // an output stored already
-        if (Loc == O.first)
-          OutLoc = *VarMap.begin();
-        else if (VarMap.count(O.first))
-          OutLoc = Loc;
         ProgramWiring[Line].insert(Loc);
+        if (!OutLocSet) {
+          // Is it output? If yes, there should be only one component output
+          // and/or any input on that line. Just grab any with matching width
+          auto const &VarMap = ProgramWiring[Line];
+          if (Loc == O.first) {
+            for (auto const &CandLoc : VarMap) {
+              if (OutWidth == CompInstMap[Loc]->Width) {
+                OutLoc = CandLoc;
+                OutLocSet = true;
+                break;
+              }
+            }
+            assert(OutLocSet && "no matching location for the output");
+          // Check if the output is stored already. If yes, then take the new
+          // location if the width matches
+          } else if (VarMap.count(O.first) &&
+                     (OutWidth == CompInstMap[Loc]->Width)) {
+            OutLoc = Loc;
+            OutLocSet = true;
+          }
+        }
       } else {
         ProgramWiring[Line] = {Loc};
       }
