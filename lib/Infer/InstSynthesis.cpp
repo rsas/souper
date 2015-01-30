@@ -424,7 +424,7 @@ void InstSynthesis::setInvalidWirings() {
   // Inputs
   for (auto const &In : I) {
     unsigned Width = CompInstMap[In.first]->Width;
-    // Compare with component inputs and its output
+    // Compare with component inputs and the output
     for (auto const &L_x : Tmp) {
       if (Width == CompInstMap[L_x.first]->Width)
         continue;
@@ -444,18 +444,6 @@ void InstSynthesis::setInvalidWirings() {
       InvalidWirings.insert(std::make_pair(L_y, L_x));
     }
   }
-  // Component inputs -> Component inputs.
-  // E.g. Select has different input widths
-  for (unsigned J = 0; J < P.size(); ++J) {
-    auto const &L_x = P[J];
-    unsigned Width = CompInstMap[L_x.first]->Width;
-    for (unsigned K = J+1; K < P.size(); ++K) {
-      auto const &L_y = P[K];
-      if (Width == CompInstMap[L_y.first]->Width)
-        continue;
-      InvalidWirings.insert(std::make_pair(L_x, L_y));
-    }
-  }
 
   // Don't wire a component's input to its output.
   for (auto const &L_x : P)
@@ -469,6 +457,14 @@ void InstSynthesis::setInvalidWirings() {
   // Don't wire a component's input to the output
   for (auto const &L_x : P)
     InvalidWirings.insert(std::make_pair(L_x, O));
+  // Don't wire a component's input(s) to other component
+  // input(s) directly. The solver should decide through other
+  // wirings if such connections are possible. For example, a solver
+  // could find out that 1_1 = 0_ and 1_2 = 0_1 => 1_1 = 1_2, making
+  // the explicit wiring test (1_1 = 1_2) redundant.
+  for (unsigned J = 0; J < P.size(); ++J)
+    for (unsigned K = J+1; K < P.size(); ++K)
+      InvalidWirings.insert(std::make_pair(P[J], P[K]));
 }
 
 Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
