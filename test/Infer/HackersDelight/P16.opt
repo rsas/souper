@@ -3,12 +3,12 @@
 ; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-comps=sub,xor,xor,and,zext,ule,const %s > %t1
 ; RUN: FileCheck %s < %t1
 
-; CHECK: {{(%8:i1 = ule %0, %1|result %7)}}
-; CHECK: {{(%9:i32 = zext %8)?}}
-; CHECK: {{(%10:i32 = sub %9, 1:i32)?}}
-; CHECK: {{(%11:i32 = and %10, %2)?}}
-; CHECK: {{(%12:i32 = xor %1, %11)?}}
-; CHECK: {{(result %12)?}}
+; CHECK:      %8:i1 = ule %0, %1
+; CHECK-NEXT: %9:i32 = zext %8
+; CHECK-NEXT: %10:i32 = sub 0:i32, %9
+; CHECK-NEXT: %11:i32 = and %10, %2
+; CHECK-NEXT: %12:i32 = xor %0, %11
+; CHECK-NEXT: result %12
 
 ; Compute max of two integers
 %0:i32 = var
