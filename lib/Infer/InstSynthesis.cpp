@@ -841,14 +841,13 @@ LocVar InstSynthesis::parseWiringModel(
       LocVar Loc = getLocVarFromStr(Name.substr(LOC_PREFIX.size()));
       unsigned Line = (unsigned)ModelVals[J].getZExtValue();
       if (ProgramWiring.count(Line)) {
-        ProgramWiring[Line].insert(Loc);
         if (!OutLocSet) {
           // Is it output? If yes, there should be only one component output
           // and/or any input on that line. Just grab any with matching width
           auto const &VarMap = ProgramWiring[Line];
           if (Loc == O.first) {
             for (auto const &CandLoc : VarMap) {
-              if (OutWidth == CompInstMap[Loc]->Width) {
+              if (OutWidth == CompInstMap[CandLoc]->Width) {
                 OutLoc = CandLoc;
                 OutLocSet = true;
                 break;
@@ -863,6 +862,7 @@ LocVar InstSynthesis::parseWiringModel(
             OutLocSet = true;
           }
         }
+        ProgramWiring[Line].insert(Loc);
       } else {
         ProgramWiring[Line] = {Loc};
       }
