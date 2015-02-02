@@ -184,7 +184,7 @@ private:
   /// Required during model parsing
   std::map<std::string, LocInst> LocInstMap;
   /// Invalid wirings
-  std::set<std::pair<LocInst, LocInst>> InvalidWirings;
+  std::set<std::pair<LocVar, LocVar>> InvalidWirings;
 
   /// Initialize components to be used during synthesis
   void setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds);
@@ -288,7 +288,7 @@ private:
   LocVar getLocVarFromStr(const std::string &Str);
   std::vector<LocVar> getOpLocs(const LocVar &Loc);
   std::vector<std::string> splitString(const char *S, char Del=',');
-  bool isWiringInvalid(const LocInst &Left, const LocInst &Right);
+  bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
 
 };
 

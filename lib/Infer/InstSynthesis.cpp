@@ -428,7 +428,7 @@ void InstSynthesis::setInvalidWirings() {
     for (auto const &L_x : Tmp) {
       if (Width == CompInstMap[L_x.first]->Width)
         continue;
-      InvalidWirings.insert(std::make_pair(In, L_x));
+      InvalidWirings.insert(std::make_pair(In.first, L_x.first));
     }
   }
   // Compare outputs
@@ -441,7 +441,7 @@ void InstSynthesis::setInvalidWirings() {
         continue;
       if (Width == CompInstMap[L_x.first]->Width)
         continue;
-      InvalidWirings.insert(std::make_pair(L_y, L_x));
+      InvalidWirings.insert(std::make_pair(L_y.first, L_x.first));
     }
   }
 
@@ -449,14 +449,14 @@ void InstSynthesis::setInvalidWirings() {
   for (auto const &L_x : P)
     for (auto const &L_y : R)
       if (L_x.first.first == L_y.first.first)
-        InvalidWirings.insert(std::make_pair(L_x, L_y));
+        InvalidWirings.insert(std::make_pair(L_x.first, L_y.first));
   // Don't wire input to a component's output
   for (auto const &L_x : I)
     for (auto const &L_y : R)
-      InvalidWirings.insert(std::make_pair(L_x, L_y));
+      InvalidWirings.insert(std::make_pair(L_x.first, L_y.first));
   // Don't wire a component's input to the output
   for (auto const &L_x : P)
-    InvalidWirings.insert(std::make_pair(L_x, O));
+    InvalidWirings.insert(std::make_pair(L_x.first, O.first));
   // Don't wire a component's input(s) to other component
   // input(s) directly. The solver should decide through other
   // wirings if such connections are possible. For example, a solver
@@ -464,11 +464,11 @@ void InstSynthesis::setInvalidWirings() {
   // the explicit wiring test (1_1 = 1_2) redundant.
   for (unsigned J = 0; J < P.size(); ++J)
     for (unsigned K = J+1; K < P.size(); ++K)
-      InvalidWirings.insert(std::make_pair(P[J], P[K]));
+      InvalidWirings.insert(std::make_pair(P[J].first, P[K].first));
   // Similarly, don't wire an input with other inputs(s) explicitly
   for (unsigned J = 0; J < I.size(); ++J)
     for (unsigned K = J+1; K < I.size(); ++K)
-      InvalidWirings.insert(std::make_pair(I[J], I[K]));
+      InvalidWirings.insert(std::make_pair(I[J].first, I[K].first));
 }
 
 Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
@@ -481,7 +481,7 @@ Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
     auto const &L_x = R[J];
     for (unsigned K = J+1; K < R.size(); ++K) {
       auto const &L_y = R[K];
-      InvalidWirings.insert(std::make_pair(L_x, L_y));
+      InvalidWirings.insert(std::make_pair(L_x.first, L_y.first));
       Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
       Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
       if (DebugSynthesis)
@@ -600,7 +600,7 @@ Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
       auto const &L_x = L[J];
       auto const &L_y = L[K];
       // Skip invalid wirings
-      if (isWiringInvalid(L_x, L_y))
+      if (isWiringInvalid(L_x.first, L_y.first))
         continue;
       auto const &X = CompInstMap[L_x.first];
       auto const &Y = CompInstMap[L_y.first];
@@ -629,7 +629,7 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
     Inst *Ante = IC.getConst(APInt(1, false));
     // Inputs
     for (auto const &In : I) {
-      if (isWiringInvalid(L_x, In))
+      if (isWiringInvalid(L_x.first, In.first))
         continue;
       Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, In.second});
       Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
@@ -642,7 +642,7 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
       // Don't constrain yourself
       if (L_x.first.first == L_y.first.first)
         continue;
-      if (isWiringInvalid(L_x, L_y))
+      if (isWiringInvalid(L_x.first, L_y.first))
         continue;
       Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
       Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
@@ -667,7 +667,7 @@ Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
   unsigned Width = CompInstMap[O.first]->Width;
   // Inputs
   for (auto const &In : I) {
-    if (isWiringInvalid(In, O))
+    if (isWiringInvalid(In.first, O.first))
       continue;
     Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, In.second});
     Ret = IC.getInst(Inst::Or, 1, {Ret, Eq});
@@ -677,7 +677,7 @@ Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
   }
   // Component outputs
   for (auto const &L_y : R) {
-    if (isWiringInvalid(L_y, O))
+    if (isWiringInvalid(L_y.first, O.first))
       continue;
     Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, L_y.second});
     Ret = IC.getInst(Inst::Or, 1, {Ret, Eq});
@@ -830,7 +830,7 @@ LocVar InstSynthesis::parseWiringModel(
        std::map<LocVar, llvm::APInt> &ConstValMap) {
   assert(ModelVals.size() && "there must models to parse");
   unsigned Counter = 0;
-  LocVar OutLoc;
+  LocVar OutLocVar;
   bool OutLocSet = false;
   unsigned OutWidth = CompInstMap[O.first]->Width;
 
@@ -841,24 +841,26 @@ LocVar InstSynthesis::parseWiringModel(
       LocVar Loc = getLocVarFromStr(Name.substr(LOC_PREFIX.size()));
       unsigned Line = (unsigned)ModelVals[J].getZExtValue();
       if (ProgramWiring.count(Line)) {
+        // Look for the output wiring. It can be a component's output or any
+        // of the inputs. Note that due to scalability reasons, we haven't
+        // encoded width mismatches and other invalid wirings as constraints,
+        // thus, we need to perform sanity checks on candidates
         if (!OutLocSet) {
           // Is it output? If yes, there should be only one component output
-          // and/or any input on that line. Just grab any with matching width
+          // and/or any input on that line
           auto const &VarMap = ProgramWiring[Line];
           if (Loc == O.first) {
-            for (auto const &CandLoc : VarMap) {
-              if (OutWidth == CompInstMap[CandLoc]->Width) {
-                OutLoc = CandLoc;
+            for (auto const &CandLocVar : VarMap) {
+              if (!isWiringInvalid(O.first, CandLocVar)) {
+                OutLocVar = CandLocVar;
                 OutLocSet = true;
                 break;
               }
             }
-            assert(OutLocSet && "no matching location for the output");
           // Check if the output is stored already. If yes, then take the new
           // location if the width matches
-          } else if (VarMap.count(O.first) &&
-                     (OutWidth == CompInstMap[Loc]->Width)) {
-            OutLoc = Loc;
+          } else if (VarMap.count(O.first) && !isWiringInvalid(O.first, Loc)) {
+            OutLocVar = Loc;
             OutLocSet = true;
           }
         }
@@ -873,11 +875,11 @@ LocVar InstSynthesis::parseWiringModel(
       ConstValMap[Loc] = ModelVals[J];
     }
   }
+  assert(OutLocSet && "no matching location for the output");
   assert(ProgramWiring.size() <= M && "the output location must be <= M");
-  assert(CompInstMap.count(OutLoc) && "invalid output location");
   assert(Counter == L.size() && "invalid number of locations in the model");
 
-  return OutLoc;
+  return OutLocVar;
 }
 
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
@@ -980,7 +982,7 @@ std::vector<std::string> InstSynthesis::splitString(const char *S, char Del) {
   return Res;
 }
 
-bool InstSynthesis::isWiringInvalid(const LocInst &Left, const LocInst &Right) {
+bool InstSynthesis::isWiringInvalid(const LocVar &Left, const LocVar &Right) {
   return (InvalidWirings.count(std::make_pair(Left, Right)) ||
           InvalidWirings.count(std::make_pair(Right, Left)));
 }
