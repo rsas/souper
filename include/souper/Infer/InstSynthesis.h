@@ -259,6 +259,7 @@ private:
   /// Create a program from a solver model
   Inst *createInstFromModel(const std::vector<Inst *> &ModelInsts,
                             const std::vector<llvm::APInt> &ModelVals,
+                            std::vector<std::pair<LocInst, LocInst>> &Wiring,
                             InstContext &IC);
 
   /// A mapping from program locations (line numbers) to a set of component
@@ -270,6 +271,7 @@ private:
                              const std::vector<LocVar> &OpLocs,
                              const LineLocVarMap &ProgramWiring,
                              const std::map<LocVar, llvm::APInt> &ConstValMap,
+                             std::vector<std::pair<LocInst, LocInst>> &Wiring,
                              InstContext &IC);
 
   /// Parse wiring models extracting concrete values for location variables

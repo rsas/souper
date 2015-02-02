@@ -31,6 +31,9 @@ static cl::opt<int> CmdMaxComps("souper-synthesis-comp-num",
 static cl::opt<std::string> CmdUserCompKinds("souper-synthesis-comps",
     cl::desc("Comma-separated list of instruction synthesis component kinds"),
     cl::init(""));
+static cl::opt<bool> SynthesizeLHS("souper-synthesize-lhs", cl::Hidden,
+    cl::desc("Permit LHS synthesis (default=false)"),
+    cl::init(false));
 
 }
 
@@ -155,10 +158,25 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       llvm::outs() << "round: " << Rounds << "\n";
     Rounds++;
 
-    Inst *Cand = createInstFromModel(ModelInsts, ModelVals, IC);
+    std::vector<std::pair<LocInst, LocInst>> Wiring;
+    Inst *Cand = createInstFromModel(ModelInsts, ModelVals, Wiring, IC);
     if (!Cand) {
       llvm::errs() << "synthesis bug: creating inst from a model failed\n";
       return EC;
+    }
+
+    if (Cand == LHS && !SynthesizeLHS) {
+      if (DebugSynthesis)
+        llvm::outs() << "inferred original LHS, constrain wiring\n";
+      Inst *Ante = IC.getConst(APInt(1, true));
+      for (auto const &Pair : Wiring) {
+        auto const &L_x = Pair.first;
+        auto const &L_y = Pair.second;
+        Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
+        Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
+      }
+      NewPCs.emplace_back(Ante, IC.getConst(APInt(1, false)));
+      continue;
     }
 
     if (DebugSynthesis) {
@@ -718,12 +736,15 @@ Inst *InstSynthesis::getInstCopy(Inst *I, InstContext &IC,
 
 Inst *InstSynthesis::createInstFromModel(const std::vector<Inst *> &ModelInsts,
                                          const std::vector<llvm::APInt> &ModelVals,
+                                         std::vector<std::pair<LocInst, LocInst>> &Wiring,
                                          InstContext &IC) {
   LineLocVarMap ProgramWiring;
   std::map<LocVar, llvm::APInt> ConstValMap;
 
   LocVar OutLoc = parseWiringModel(ModelInsts, ModelVals,
                                    ProgramWiring, ConstValMap);
+  Wiring.emplace_back(LocVarMap[O.first], LocVarMap[OutLoc]);
+
   if (DebugSynthesis) {
     llvm::outs() << "found valid wiring, output "
                  << getLocVarStr(OutLoc) << ".\n";
@@ -750,8 +771,8 @@ Inst *InstSynthesis::createInstFromModel(const std::vector<Inst *> &ModelInsts,
       llvm::outs() << getLocVarStr(OpLoc) << " ";
     llvm::outs() << "}\n";
   }
-  Inst *Res = createInstFromWiring(OutLoc, OpLocs,
-                                   ProgramWiring, ConstValMap, IC);
+  Inst *Res = createInstFromWiring(OutLoc, OpLocs, ProgramWiring,
+                                   ConstValMap, Wiring, IC);
   assert(Res && "creating instruction from wiring failed");
 
   return Res;
@@ -762,12 +783,15 @@ Inst *InstSynthesis::createInstFromWiring(
       const std::vector<LocVar> &OpLocs,
       const LineLocVarMap &ProgramWiring,
       const std::map<LocVar, llvm::APInt> &ConstValMap,
+      std::vector<std::pair<LocInst, LocInst>> &Wiring,
       InstContext &IC) {
   std::vector<Inst *> Ops;
 
   // Create operand instructions recursively
   for (auto const &OpLoc : OpLocs) {
     LocVar Match = getWiringLocVar(OpLoc, ProgramWiring);
+    // Store wiring locations
+    Wiring.emplace_back(LocVarMap[OpLoc], LocVarMap[Match]);
     assert(CompInstMap.count(Match) && "unknown matching location variable");
     if (!CompInstMap.count(Match)) {
       llvm::errs() << "synthesis bug: component input "
@@ -784,7 +808,8 @@ Inst *InstSynthesis::createInstFromWiring(
       llvm::outs() << "}\n";
     }
     // Recurse
-    Inst *Op = createInstFromWiring(Match, Res, ProgramWiring, ConstValMap, IC);
+    Inst *Op = createInstFromWiring(Match, Res, ProgramWiring,
+                                    ConstValMap, Wiring, IC);
     // Store result
     Ops.push_back(Op);
   }
@@ -938,7 +963,7 @@ LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
       if (DebugSynthesis)
         llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
       for (auto const &In : E.second) {
-        // Take either input of component output
+        // Take either input or component output
         if (In.first == 0 || In.second == 0) {
           Match = In;
           if (DebugSynthesis)
