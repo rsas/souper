@@ -261,17 +261,22 @@ void InstSynthesis::setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds)
     MaxCompNum = Comps.size();
 }
 
-void InstSynthesis::getInputVars(Inst *I, std::set<Inst *> &InputVars) {
+void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
   if (I->K == Inst::Var)
-    InputVars.insert(I);
+    InputVars.push_back(I);
   for (auto I : I->orderedOps())
     getInputVars(I, InputVars);
 }
 
 void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
-  std::set<Inst *> Tmp;
+  std::vector<Inst *> Tmp;
   getInputVars(LHS, Tmp);
-  std::vector<Inst *> Inputs(Tmp.begin(), Tmp.end());
+  // Remove duplicates
+  std::set<Inst *> TmpSet;
+  std::vector<Inst *> Inputs;
+  for (auto I : Tmp)
+    if (TmpSet.insert(I).second)
+      Inputs.push_back(I);
   for (unsigned J = 0; J < Inputs.size(); ++J) {
     // Note that location variable 0_0 is not used
     LocVar In = std::make_pair(0, J+1);

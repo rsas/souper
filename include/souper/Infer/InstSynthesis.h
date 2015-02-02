@@ -189,8 +189,8 @@ private:
   /// Initialize components to be used during synthesis
   void setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds);
 
-  /// Get input variables
-  void getInputVars(Inst *I, std::set<Inst *> &InputVars);
+  /// Get input variables. Use a vector to ensure deterministic order
+  void getInputVars(Inst *I, std::vector<Inst *> &InputVars);
 
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
