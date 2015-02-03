@@ -208,9 +208,6 @@ private:
   /// Print some debug info on initial synthesis settings
   void printInitInfo();
 
-  /// Create a fresh location variable
-  Inst *createLocVarInst(const LocVar &Loc, InstContext &IC);
-
   /// Set particular wirings to be invalid (e.g. width mismatches).
   /// These invalid wirings are not encoded as constraints, they are
   /// simply skipped during constraint creation process

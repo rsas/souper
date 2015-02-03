@@ -298,14 +298,16 @@ void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
   for (unsigned J = 0; J < Inputs.size(); ++J) {
     // Note that location variable 0_0 is not used
     LocVar In = std::make_pair(0, J+1);
-    Inst *Loc = createLocVarInst(In, IC);
+    std::string LocVarStr = getLocVarStr(In, LOC_PREFIX);
+    Inst *Loc = IC.createVar(LocInstWidth, LocVarStr);
+    LocInstMap[LocVarStr] = std::make_pair(In, Loc);
     // Add input location to I
     I.emplace_back(In, Loc);
     // Update input name
-    std::string LocVarStr = getLocVarStr(In, INPUT_PREFIX);
+    LocVarStr = getLocVarStr(In, INPUT_PREFIX);
     Inputs[J]->Name = LocVarStr;
-    // Update CompInstMap map with concrete Inst
     LocInstMap[LocVarStr] = std::make_pair(In, Loc);
+    // Update CompInstMap map with concrete Inst
     CompInstMap[In] = Inputs[J];
     // Set the DefaultInstWidth of component instances to the max width
     // seen in input variables
@@ -327,7 +329,9 @@ void InstSynthesis::initComponents(InstContext &IC) {
     std::vector<Inst *> CompOps;
     for (unsigned K = 0; K < Comp.OpNum; ++K) {
       LocVar In = std::make_pair(J+1, K+1);
-      Inst *Loc = createLocVarInst(In, IC);
+      LocVarStr = getLocVarStr(In, LOC_PREFIX);
+      Inst *Loc = IC.createVar(LocInstWidth, LocVarStr);
+      LocInstMap[LocVarStr] = std::make_pair(In, Loc);
       // Add component input location to P
       P.emplace_back(In, Loc);
       // Create concrete component input encoded as a fresh variable
@@ -349,7 +353,9 @@ void InstSynthesis::initComponents(InstContext &IC) {
 
     // Second, init component output
     LocVar Out = std::make_pair(J+1, 0);
-    Inst *Loc = createLocVarInst(Out, IC);
+    LocVarStr = getLocVarStr(Out, LOC_PREFIX);
+    Inst *Loc = IC.createVar(LocInstWidth, LocVarStr);
+    LocInstMap[LocVarStr] = std::make_pair(Out, Loc);
     // Add component output to R.
     R.emplace_back(Out, Loc);
 
@@ -430,14 +436,6 @@ void InstSynthesis::printInitInfo() {
     llvm::outs() << getLocVarStr(In.first) << " ";
   llvm::outs() << "\n";
   llvm::outs() << "O: " << getLocVarStr(O.first) << "\n";
-}
-
-Inst *InstSynthesis::createLocVarInst(const LocVar &Loc, InstContext &IC) {
-  std::string LocVarStr = getLocVarStr(Loc, LOC_PREFIX);
-  Inst *LocInst = IC.createVar(LocInstWidth, LocVarStr);
-  LocInstMap[LocVarStr] = std::make_pair(Loc, LocInst);
-
-  return LocInst;
 }
 
 void InstSynthesis::setInvalidWirings() {
