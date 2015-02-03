@@ -36,6 +36,10 @@ static llvm::cl::opt<std::string> STPPath(
     "stp-path", llvm::cl::desc("Path to STP executable"), llvm::cl::init(""),
     llvm::cl::value_desc("path"));
 
+static llvm::cl::opt<std::string> STPWrapPath(
+    "stpwrap-path", llvm::cl::desc("Path to STP wrapper executable"), llvm::cl::init(""),
+    llvm::cl::value_desc("path"));
+
 static llvm::cl::opt<std::string> Z3Path(
     "z3-path", llvm::cl::desc("Path to Z3 executable"), llvm::cl::init(""),
     llvm::cl::value_desc("path"));
@@ -54,6 +58,9 @@ static std::unique_ptr<SMTLIBSolver> GetUnderlyingSolverFromArgs() {
   } else if (!STPPath.empty()) {
     return createSTPSolver(makeExternalSolverProgram(STPPath),
                            KeepSolverInputs);
+  } else if (!STPWrapPath.empty()) {
+    return createSTPWrapSolver(makeExternalSolverProgram(STPWrapPath),
+                               KeepSolverInputs);
   } else if (!Z3Path.empty()) {
     return createZ3Solver(makeExternalSolverProgram(Z3Path),
                           KeepSolverInputs);

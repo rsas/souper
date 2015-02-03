@@ -47,6 +47,7 @@ std::unique_ptr<SMTLIBSolver> createBoolectorSolver(SolverProgram Prog,
                                                     bool Keep);
 std::unique_ptr<SMTLIBSolver> createCVC4Solver(SolverProgram Prog, bool Keep);
 std::unique_ptr<SMTLIBSolver> createSTPSolver(SolverProgram Prog, bool Keep);
+std::unique_ptr<SMTLIBSolver> createSTPWrapSolver(SolverProgram Prog, bool Keep);
 std::unique_ptr<SMTLIBSolver> createZ3Solver(SolverProgram Prog, bool Keep);
 
 }

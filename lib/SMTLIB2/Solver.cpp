@@ -392,6 +392,12 @@ std::unique_ptr<SMTLIBSolver> souper::createSTPSolver(SolverProgram Prog,
       new ProcessSMTLIBSolver("STP", Keep, Prog, false, {"--SMTLIB2"}));
 }
 
+std::unique_ptr<SMTLIBSolver> souper::createSTPWrapSolver(SolverProgram Prog,
+                                                          bool Keep) {
+  return std::unique_ptr<SMTLIBSolver>(
+      new ProcessSMTLIBSolver("STPWrapper", Keep, Prog, true, {}));
+}
+
 std::unique_ptr<SMTLIBSolver> souper::createZ3Solver(SolverProgram Prog,
                                                      bool Keep) {
   return std::unique_ptr<SMTLIBSolver>(
