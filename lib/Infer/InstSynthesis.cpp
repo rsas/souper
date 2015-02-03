@@ -743,7 +743,9 @@ Inst *InstSynthesis::createInstFromModel(const std::vector<Inst *> &ModelInsts,
 
   LocVar OutLoc = parseWiringModel(ModelInsts, ModelVals,
                                    ProgramWiring, ConstValMap);
-  Wiring.emplace_back(LocVarMap[O.first], LocVarMap[OutLoc]);
+  auto Left = getLocVarStr(O.first, LOC_PREFIX);
+  auto Right = getLocVarStr(OutLoc, LOC_PREFIX);
+  Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
 
   if (DebugSynthesis) {
     llvm::outs() << "found valid wiring, output "
@@ -790,14 +792,16 @@ Inst *InstSynthesis::createInstFromWiring(
   // Create operand instructions recursively
   for (auto const &OpLoc : OpLocs) {
     LocVar Match = getWiringLocVar(OpLoc, ProgramWiring);
-    // Store wiring locations
-    Wiring.emplace_back(LocVarMap[OpLoc], LocVarMap[Match]);
     assert(CompInstMap.count(Match) && "unknown matching location variable");
     if (!CompInstMap.count(Match)) {
       llvm::errs() << "synthesis bug: component input "
                    << getLocVarStr(OpLoc) << " not wired\n";
       return 0;
     }
+    // Store wiring locations
+    auto Left = getLocVarStr(OpLoc, LOC_PREFIX);
+    auto Right = getLocVarStr(Match, LOC_PREFIX);
+    Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
     // Get operand locations of the wiring location
     auto Res = getOpLocs(Match);
     if (DebugSynthesis) {
