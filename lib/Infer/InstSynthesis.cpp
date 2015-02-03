@@ -31,8 +31,8 @@ static cl::opt<int> CmdMaxComps("souper-synthesis-comp-num",
 static cl::opt<std::string> CmdUserCompKinds("souper-synthesis-comps",
     cl::desc("Comma-separated list of instruction synthesis component kinds"),
     cl::init(""));
-static cl::opt<bool> SynthesizeLHS("souper-synthesize-lhs", cl::Hidden,
-    cl::desc("Permit LHS synthesis (default=false)"),
+static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost", cl::Hidden,
+    cl::desc("Ignore cand inst cost (default=false)"),
     cl::init(false));
 
 }
@@ -59,6 +59,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Default return values
   std::error_code EC;
   RHS = 0;
+
+  // Cost function
+  int LHSCost = cost(LHS);
 
   // Prepare inputs
   initInputVars(LHS, IC);
@@ -165,17 +168,19 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       return EC;
     }
 
-    if (Cand == LHS && !SynthesizeLHS) {
+    // Is it worth it to check this candidate at all?
+    if ((LHSCost - cost(Cand) < 1) && !IgnoreCost) {
       if (DebugSynthesis)
-        llvm::outs() << "inferred original LHS, constrain wiring\n";
+        llvm::outs() << "Cand is too expensive " << cost(Cand)
+                     << " >= " << LHSCost << "\n";
       Inst *Ante = IC.getConst(APInt(1, true));
       for (auto const &Pair : Wiring) {
         auto const &L_x = Pair.first;
         auto const &L_y = Pair.second;
-        Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
-        Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
+        Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
-      NewPCs.emplace_back(Ante, IC.getConst(APInt(1, false)));
+      NewPCs.emplace_back(Ante, IC.getConst(APInt(1, true)));
       continue;
     }
 
@@ -1017,6 +1022,20 @@ std::vector<std::string> InstSynthesis::splitString(const char *S, char Del) {
 bool InstSynthesis::isWiringInvalid(const LocVar &Left, const LocVar &Right) {
   return (InvalidWirings.count(std::make_pair(Left, Right)) ||
           InvalidWirings.count(std::make_pair(Right, Left)));
+}
+
+int InstSynthesis::costHelper(Inst *I, std::set<Inst *> &Visited) {
+  if (!Visited.insert(I).second)
+    return 0;
+  int Cost = Inst::getCost(I->K);
+  for (auto Op : I->Ops)
+    Cost += costHelper(Op, Visited);
+  return Cost;
+}
+
+int InstSynthesis::cost(Inst *I) {
+  std::set<Inst *> Visited;
+  return costHelper(I, Visited);
 }
 
 }
