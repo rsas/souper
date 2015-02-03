@@ -116,12 +116,7 @@ public:
     }
 
     if (InferInsts && SMTSolver->supportsModels()) {
-      // Synthesis API usage example
-      std::vector<Inst::Kind> UserComps = { Inst::And, Inst::Const, Inst::Mul };
-      InstSynthesis IS(/*Comps=*/&UserComps);
-      //InstSynthesis IS(/*Comps=*/&UserComps, /*MaxCompNum=*/2);
-      // Warning: using all components will probably run out of memory
-      //InstSynthesis IS;
+      InstSynthesis IS;
       EC = IS.synthesize(SMTSolver.get(), BPCs, PCs, LHS, RHS, IC, Timeout);
       if (EC || RHS)
         return EC;

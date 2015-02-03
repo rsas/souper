@@ -102,6 +102,7 @@ struct Inst : llvm::FoldingSetNode {
 
   static bool isAssociative(Kind K);
   static bool isCommutative(Kind K);
+  static int getCost(Kind K);
 };
 
 /// A mapping from an Inst to a replacement. This may either represent a
