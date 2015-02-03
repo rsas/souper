@@ -5,9 +5,9 @@
 
 ; CHECK:      %8:i1 = ule %0, %1
 ; CHECK-NEXT: %9:i32 = zext %8
-; CHECK-NEXT: %10:i32 = sub 0:i32, %9
+; CHECK-NEXT: %10:i32 = sub %9, 1:i32
 ; CHECK-NEXT: %11:i32 = and %10, %2
-; CHECK-NEXT: %12:i32 = xor %0, %11
+; CHECK-NEXT: %12:i32 = xor %1, %11
 ; CHECK-NEXT: result %12
 
 ; Compute max of two integers

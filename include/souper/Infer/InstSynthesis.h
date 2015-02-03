@@ -95,8 +95,6 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 /// indicate this by setting the Width to 0. During initialization, the width
 /// will be set to the DefaultInstWidth (maximum width of the input vars).
 static const std::vector<Component> CompLibrary = {
-  // Reserved: Set the const width to the output width (constant synthesis)
-  Component{Inst::Const, static_cast<unsigned>(~0), 0},
   Component{Inst::Const, 0, 0},
   //
   Component{Inst::Add, 0, 2},
@@ -138,10 +136,7 @@ static const std::vector<Component> CompLibrary = {
 
 class InstSynthesis {
 public:
-  // If Comps != 0 and MaxCompNum < 0, use only component kinds
-  // from Comps during synthesis. If MaxCompNum == 0, inputs are wired
-  // directly to the output (nop synthesis)
-  InstSynthesis(const std::vector<Inst::Kind> *Comps=0, int MaxCompNum=-1);
+  InstSynthesis();
 
   // Synthesize an instruction for the specification in LHS
   std::error_code synthesize(SMTLIBSolver *SMTSolver,
@@ -187,7 +182,7 @@ private:
   std::set<std::pair<LocVar, LocVar>> InvalidWirings;
 
   /// Initialize components to be used during synthesis
-  void setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds);
+  void setCompLibrary();
 
   /// Get input variables. Use a vector to ensure deterministic order
   void getInputVars(Inst *I, std::vector<Inst *> &InputVars);

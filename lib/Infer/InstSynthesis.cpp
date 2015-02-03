@@ -45,10 +45,8 @@ static const std::string LOC_SEP = "_";
 static const std::string COMP_INPUT_PREFIX = "compin_";
 static const std::string CONST_PREFIX = "const_";
 
-InstSynthesis::InstSynthesis(const std::vector<Inst::Kind> *UserCompKinds,
-                             int MaxCompNum)
-      : MaxCompNum(CmdMaxComps >= 0 ? CmdMaxComps : MaxCompNum) {
-    setCompLibrary(UserCompKinds);
+InstSynthesis::InstSynthesis()
+      : MaxCompNum(CmdMaxComps >= 0 ? CmdMaxComps : -1) {
 }
 
 std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
@@ -62,6 +60,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
   // Cost function
   int LHSCost = cost(LHS);
+
+  // Set component library
+  setCompLibrary();
 
   // Prepare inputs
   initInputVars(LHS, IC);
@@ -247,7 +248,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   return EC;
 }
 
-void InstSynthesis::setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds) {
+void InstSynthesis::setCompLibrary() {
   if (!MaxCompNum)
     return;
   if (CmdUserCompKinds.size()) {
@@ -268,18 +269,13 @@ void InstSynthesis::setCompLibrary(const std::vector<Inst::Kind> *UserCompKinds)
       for (auto const &Kind : Kinds)
         if (Comp.Kind == Kind)
           Comps.push_back(Comp);
-  } else if (UserCompKinds) {
-    for (auto const &Comp : CompLibrary)
-      for (auto Kind : *UserCompKinds)
-        if (Comp.Kind == Kind)
-          Comps.push_back(Comp);
   } else {
     llvm::outs() << "WARNING: using all " << CompLibrary.size()
                  << " components, synthesis will probably take long time"
                  << " or run out of memory\n";
     Comps = CompLibrary;
   }
-  // Adjust the maximum number of components to use.
+  // Adjust the maximum number of components to use
   if (MaxCompNum > Comps.size())
     MaxCompNum = Comps.size();
 }
