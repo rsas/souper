@@ -864,7 +864,6 @@ Inst *InstSynthesis::createInstFromWiring(
 LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
                                        LineLocVarMap &ProgramWiring,
                                        std::map<LocVar, llvm::APInt> &ConstValMap) {
-  assert(ModelVals.size() && "there must models to parse");
   unsigned Counter = 0;
   LocVar OutLocVar;
   bool OutLocSet = false;
@@ -872,6 +871,7 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
 
   auto ModelInsts = Solution.first;
   auto ModelVals = Solution.second;
+  assert(ModelVals.size() && "there must models to parse");
   for (unsigned J = 0; J != ModelInsts.size(); ++J) {
     auto Name = ModelInsts[J]->Name;
     // Parse location variable models
