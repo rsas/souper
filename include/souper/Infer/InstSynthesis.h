@@ -165,16 +165,16 @@ private:
   /// Location variables set L (I \cup P \cup R \cup {O}).
   std::vector<LocInst> L;
   /// Number of input variables
-  unsigned N = 0;
+  unsigned N;
   /// Number of components + N
-  unsigned M = 0;
+  unsigned M;
   /// A mapping from a location variable to a concrete component instance,
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
   /// Default component inst width
   unsigned DefaultInstWidth = 0;
   /// LocInst width is fixed
-  unsigned const LocInstWidth = 32;
+  const unsigned LocInstWidth = 32;
   /// A mapping from a location variable's string representation to its location.
   /// Required during model parsing
   std::map<std::string, LocInst> LocInstMap;
