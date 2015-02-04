@@ -87,7 +87,6 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
   Inst::SubNSW, Inst::SubNUW, Inst::SubNW,
   Inst::MulNSW, Inst::MulNUW, Inst::MulNW,
   Inst::ShlNSW, Inst::ShlNUW, Inst::ShlNW,
-  Inst::AddNSW, Inst::AddNUW, Inst::AddNW,
 };
 
 /// Supported component library.
