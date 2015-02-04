@@ -277,6 +277,10 @@ private:
   /// The result is either an input or a component output
   LocVar getWiringLocVar(const LocVar &Loc, const LineLocVarMap &ProgramWiring);
 
+  /// Create junk-free inst. E.g., return %0 if inst is of type and %0, %0
+  Inst *createJunkFreeInst(Inst::Kind Kind, unsigned Width,
+                           std::vector<Inst *> &Ops, InstContext &IC);
+
   /// Helper functions
   std::string getLocVarStr(const LocVar &Loc, const std::string Prefix="");
   LocVar getLocVarFromStr(const std::string &Str);

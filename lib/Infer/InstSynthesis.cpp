@@ -26,12 +26,15 @@ static cl::opt<bool> DebugSynthesis("souper-debug-synthesis",
     cl::desc("Debug instruction synthesis (default=false)"),
     cl::init(false));
 static cl::opt<int> CmdMaxComps("souper-synthesis-comp-num",
+    cl::Hidden,
     cl::desc("Maximum number of components (default=all)"),
     cl::init(-1));
 static cl::opt<std::string> CmdUserCompKinds("souper-synthesis-comps",
+    cl::Hidden,
     cl::desc("Comma-separated list of instruction synthesis component kinds"),
     cl::init(""));
-static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost", cl::Hidden,
+static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost",
+    cl::Hidden,
     cl::desc("Ignore cand inst cost (default=false)"),
     cl::init(false));
 
@@ -212,9 +215,11 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
     // Constants are not constrained by the inputs, thus, we must forbid the
     // invalid values explicitly. Similarly, if an input is wired to the output
-    // and is identified as invalid, we must skip it in the future too
-    if (Cand->K == Inst::Const || Cand->K == Inst::Var) {
-      assert(LocInstMap.count(Cand->Name) && "unknown const/var candidate location");
+    // and is identified as invalid, we must skip it in the future too. However,
+    // some constants result from junk-removal, don't forbid those locations
+    if ((Cand->K == Inst::Const && LocInstMap.count(Cand->Name)) ||
+        Cand->K == Inst::Var) {
+      assert(LocInstMap.count(Cand->Name) && "unknown var candidate location");
       Inst *Ne = IC.getInst(Inst::Ne, 1, {LocInstMap[Cand->Name].second, O.second});
       NewPCs.emplace_back(Ne, IC.getConst(APInt(1, true)));
     }
@@ -853,7 +858,7 @@ Inst *InstSynthesis::createInstFromWiring(
     llvm::outs() << "- creating inst " << Inst::getKindName(Comp.Kind)
                  << ", width " << Comp.Width << "\n";
 
-  return IC.getInst(Comp.Kind, Comp.Width, Ops);
+  return createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
 }
 
 LocVar InstSynthesis::parseWiringModel(
@@ -915,6 +920,162 @@ LocVar InstSynthesis::parseWiringModel(
   return OutLocVar;
 }
 
+LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
+                                      const LineLocVarMap &ProgramWiring) {
+  LocVar Match;
+  bool FoundMatch = false;
+
+  if (DebugSynthesis)
+    llvm::outs() << "- looking for OpLoc wiring "
+                 << getLocVarStr(OpLoc) << "\n";
+  for (auto const &E : ProgramWiring) {
+    if (E.second.count(OpLoc)) {
+      if (DebugSynthesis)
+        llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
+      for (auto const &In : E.second) {
+        // Take either input or component output
+        if (In.first == 0 || In.second == 0) {
+          Match = In;
+          if (DebugSynthesis)
+            llvm::outs() << getLocVarStr(Match);
+          FoundMatch = true;
+          break;
+        }
+      }
+      if (DebugSynthesis)
+        llvm::outs() << "\n";
+    }
+    if (FoundMatch)
+      break;
+  }
+
+  return Match;
+}
+
+Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
+                                        std::vector<Inst *> &Ops,
+                                        InstContext &IC) {
+  switch (Kind) {
+  case Inst::Add:
+  case Inst::AddNSW:
+  case Inst::AddNUW:
+  case Inst::AddNW: {
+    if (Ops[0] == IC.getConst(APInt(Width, 0)))
+      return Ops[1];
+    else if (Ops[1] == IC.getConst(APInt(Width, 0)))
+      return Ops[0];
+    break;
+  }
+
+  case Inst::Sub:
+  case Inst::SubNSW:
+  case Inst::SubNUW:
+  case Inst::SubNW: {
+    if (Ops[1] == IC.getConst(APInt(Width, 0)))
+      return Ops[0];
+    break;
+  }
+
+  case Inst::Mul:
+  case Inst::MulNSW:
+  case Inst::MulNUW:
+  case Inst::MulNW: {
+    if (Ops[0] == IC.getConst(APInt(Width, 1)))
+      return Ops[1];
+    else if (Ops[1] == IC.getConst(APInt(Width, 1)))
+      return Ops[0];
+    break;
+  }
+
+  case Inst::UDiv:
+  case Inst::SDiv:
+  case Inst::UDivExact:
+  case Inst::SDivExact: {
+    if (Ops[1] == IC.getConst(APInt(Width, 1)))
+      return Ops[0];
+    break;
+  }
+
+  case Inst::And:
+  case Inst::Or: {
+    if (Ops[0] == Ops[1])
+      return Ops[0];
+    break;
+  }
+
+  case Inst::Xor: {
+    if (Ops[0] == Ops[1])
+      return IC.getConst(APInt(Width, 0));
+    break;
+  }
+
+  case Inst::Shl:
+  case Inst::ShlNSW:
+  case Inst::ShlNUW:
+  case Inst::ShlNW:
+  case Inst::LShr:
+  case Inst::LShrExact:
+  case Inst::AShr:
+  case Inst::AShrExact: {
+    if (Ops[1] == IC.getConst(APInt(Width, 0)))
+      return Ops[0];
+    break;
+  }
+
+  case Inst::Select: {
+    if (Ops[1] == Ops[2])
+      return Ops[1];
+    break;
+  }
+
+  case Inst::ZExt:
+  case Inst::SExt:
+  case Inst::Trunc: {
+    if (Width == Ops[0]->Width)
+      return Ops[0];
+    break;
+  }
+
+  case Inst::Eq: {
+    if (Ops[0] == Ops[1])
+      return IC.getConst(APInt(1, true));
+    break;
+  }
+
+  case Inst::Ne: {
+    if (Ops[0] == Ops[1])
+      return IC.getConst(APInt(1, false));
+    break;
+  }
+
+  case Inst::Ult:
+  case Inst::Slt: {
+    if (Ops[0] == Ops[1])
+      return IC.getConst(APInt(1, false));
+    break;
+  }
+
+  case Inst::CtPop:
+  case Inst::BSwap: {
+    if (Ops[0] == IC.getConst(APInt(Width, 0)))
+      return IC.getConst(APInt(Width, 0));
+    break;
+  }
+
+  case Inst::Cttz:
+  case Inst::Ctlz: {
+    if (Ops[0] == IC.getConst(APInt(Width, 0)))
+      return IC.getConst(APInt(Width, Width));
+    break;
+  }
+
+  default:
+    break;
+  }
+
+  return IC.getInst(Kind, Width, Ops);
+}
+
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
                                         const std::string Prefix) {
   std::string Post = "";
@@ -951,38 +1112,6 @@ LocVar InstSynthesis::getLocVarFromStr(const std::string &Str) {
   assert(CompInstMap.count(Loc) && "parsed invalid location variable");
 
   return Loc;
-}
-
-LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
-                                      const LineLocVarMap &ProgramWiring) {
-  LocVar Match;
-  bool FoundMatch = false;
-
-  if (DebugSynthesis)
-    llvm::outs() << "- looking for OpLoc wiring "
-                 << getLocVarStr(OpLoc) << "\n";
-  for (auto const &E : ProgramWiring) {
-    if (E.second.count(OpLoc)) {
-      if (DebugSynthesis)
-        llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
-      for (auto const &In : E.second) {
-        // Take either input or component output
-        if (In.first == 0 || In.second == 0) {
-          Match = In;
-          if (DebugSynthesis)
-            llvm::outs() << getLocVarStr(Match);
-          FoundMatch = true;
-          break;
-        }
-      }
-      if (DebugSynthesis)
-        llvm::outs() << "\n";
-    }
-    if (FoundMatch)
-      break;
-  }
-
-  return Match;
 }
 
 std::vector<LocVar> InstSynthesis::getOpLocs(const LocVar &Loc) {
