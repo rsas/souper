@@ -248,15 +248,17 @@ private:
   Inst *getInstCopy(Inst *I, InstContext &IC,
                     const std::map<Inst *, Inst *> &Replacements);
 
-  /// Create a program from a solver model
-  Inst *createInstFromModel(const std::vector<Inst *> &ModelInsts,
-                            const std::vector<llvm::APInt> &ModelVals,
-                            std::vector<std::pair<LocInst, LocInst>> &Wiring,
-                            InstContext &IC);
-
   /// A mapping from program locations (line numbers) to a set of component
   /// location variables
   typedef std::map<unsigned, std::set<LocVar>> LineLocVarMap;
+
+  typedef std::pair<const std::vector<Inst *>&,
+                    const std::vector<llvm::APInt>&> SolverSolution;
+
+  /// Create a program from a solver model
+  Inst *createInstFromModel(const SolverSolution &Solution,
+                            std::vector<std::pair<LocInst, LocInst>> &Wiring,
+                            InstContext &IC);
 
   /// Recursive instruction creation from a given program wiring
   Inst *createInstFromWiring(const LocVar &OutLoc,
@@ -268,8 +270,7 @@ private:
 
   /// Parse wiring models extracting concrete values for location variables
   /// and constants. Return location variable that matches the output
-  LocVar parseWiringModel(const std::vector<Inst *> &ModelInsts,
-                          const std::vector<llvm::APInt> &ModelVals,
+  LocVar parseWiringModel(const SolverSolution &Solution,
                           LineLocVarMap &ProgramWiring,
                           std::map<LocVar, llvm::APInt> &ConstValMap);
 

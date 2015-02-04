@@ -61,7 +61,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   std::error_code EC;
   RHS = 0;
 
-  // Cost function
+  // LHS cost
   int LHSCost = cost(LHS);
 
   // Set component library
@@ -166,7 +166,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     Rounds++;
 
     std::vector<std::pair<LocInst, LocInst>> Wiring;
-    Inst *Cand = createInstFromModel(ModelInsts, ModelVals, Wiring, IC);
+    Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
+                                     Wiring, IC);
     if (!Cand) {
       llvm::errs() << "synthesis bug: creating inst from a model failed\n";
       return EC;
@@ -214,9 +215,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     }
 
     // Constants are not constrained by the inputs, thus, we must forbid the
-    // invalid values explicitly. Similarly, if an input is wired to the output
-    // and is identified as invalid, we must skip it in the future too. However,
-    // some constants result from junk-removal, don't forbid those locations
+    // invalid locations explicitly. Similarly, if an input is wired to the output
+    // and is identified as invalid, we must skip it's location in the future too.
+    // However, some constants result from junk-removal, don't forbid these
     if ((Cand->K == Inst::Const && LocInstMap.count(Cand->Name)) ||
         Cand->K == Inst::Var) {
       assert(LocInstMap.count(Cand->Name) && "unknown var candidate location");
@@ -249,6 +250,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // Add replacements to S
     S.push_back(Replacements);
   }
+  assert(0 && "unreachable");
 
   return EC;
 }
@@ -448,7 +450,7 @@ void InstSynthesis::setInvalidWirings() {
   // Forbid width mismatches
   std::vector<LocInst> Tmp(P.begin(), P.end());
   Tmp.push_back(O);
-  // Compare inputs
+  // -> Compare inputs
   for (auto const &In : I) {
     unsigned Width = CompInstMap[In.first]->Width;
     // with component inputs and the output
@@ -458,7 +460,7 @@ void InstSynthesis::setInvalidWirings() {
       InvalidWirings.insert(std::make_pair(In.first, L_x.first));
     }
   }
-  // Compare outputs
+  // -> Compare outputs
   for (auto const &L_y : R) {
     unsigned Width = CompInstMap[L_y.first]->Width;
     // with component inputs and the output
@@ -738,15 +740,13 @@ Inst *InstSynthesis::getInstCopy(Inst *I, InstContext &IC,
   }
 }
 
-Inst *InstSynthesis::createInstFromModel(const std::vector<Inst *> &ModelInsts,
-                                         const std::vector<llvm::APInt> &ModelVals,
+Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
                                          std::vector<std::pair<LocInst, LocInst>> &Wiring,
                                          InstContext &IC) {
   LineLocVarMap ProgramWiring;
   std::map<LocVar, llvm::APInt> ConstValMap;
 
-  LocVar OutLoc = parseWiringModel(ModelInsts, ModelVals,
-                                   ProgramWiring, ConstValMap);
+  LocVar OutLoc = parseWiringModel(Solution, ProgramWiring, ConstValMap);
   auto Left = getLocVarStr(O.first, LOC_PREFIX);
   auto Right = getLocVarStr(OutLoc, LOC_PREFIX);
   Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
@@ -861,17 +861,17 @@ Inst *InstSynthesis::createInstFromWiring(
   return createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
 }
 
-LocVar InstSynthesis::parseWiringModel(
-       const std::vector<Inst *> &ModelInsts,
-       const std::vector<llvm::APInt> &ModelVals,
-       LineLocVarMap &ProgramWiring,
-       std::map<LocVar, llvm::APInt> &ConstValMap) {
+LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
+                                       LineLocVarMap &ProgramWiring,
+                                       std::map<LocVar, llvm::APInt> &ConstValMap) {
   assert(ModelVals.size() && "there must models to parse");
   unsigned Counter = 0;
   LocVar OutLocVar;
   bool OutLocSet = false;
   unsigned OutWidth = CompInstMap[O.first]->Width;
 
+  auto ModelInsts = Solution.first;
+  auto ModelVals = Solution.second;
   for (unsigned J = 0; J != ModelInsts.size(); ++J) {
     auto Name = ModelInsts[J]->Name;
     // Parse location variable models
