@@ -971,7 +971,9 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::SubNSW:
   case Inst::SubNUW:
   case Inst::SubNW: {
-    if (Ops[1] == IC.getConst(APInt(Width, 0)))
+    if (Ops[0] == Ops[1])
+      return IC.getConst(APInt(Width, 0));
+    else if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
   }
