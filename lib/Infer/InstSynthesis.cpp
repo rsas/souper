@@ -57,24 +57,23 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                                           const std::vector<InstMapping> &PCs,
                                           Inst *LHS, Inst *&RHS, InstContext &IC,
                                           unsigned Timeout) {
-  // Default return values
   std::error_code EC;
   RHS = 0;
-
-  // LHS cost
   int LHSCost = cost(LHS);
 
-  // Set component library
   setCompLibrary();
-
-  // Prepare inputs
   initInputVars(LHS, IC);
-  // Prepare the output
+  setDefaultWidth(LHS);
+  addZSTComps(LHS);
   initOutput(LHS, IC);
-  // Prepare components
   initComponents(IC);
-  // Init locations L
   initLocations();
+
+  // Adjust the maximum number of components
+  if (MaxCompNum > Comps.size())
+    MaxCompNum = Comps.size();
+  N = I.size();
+  M = Comps.size() + N;
 
   if (DebugSynthesis)
     printInitInfo();
@@ -173,6 +172,12 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       return EC;
     }
 
+    if (DebugSynthesis) {
+      llvm::outs() << "candidate:\n";
+      ReplacementContext Context;
+      PrintReplacementRHS(llvm::outs(), Cand, Context);
+    }
+
     // Is it worth it to check this candidate at all?
     if ((LHSCost - cost(Cand) < 1) && !IgnoreCost) {
       if (DebugSynthesis)
@@ -187,12 +192,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       }
       NewPCs.emplace_back(Ante, IC.getConst(APInt(1, true)));
       continue;
-    }
-
-    if (DebugSynthesis) {
-      llvm::outs() << "candidate:\n";
-      ReplacementContext Context;
-      PrintReplacementRHS(llvm::outs(), Cand, Context);
     }
 
     // Does the candidate work for all inputs?
@@ -263,8 +262,11 @@ void InstSynthesis::setCompLibrary() {
     // Parse user-provided component kind strings
     for (auto KindStr : splitString(CmdUserCompKinds.c_str())) {
       Inst::Kind K = Inst::getKind(KindStr);
+      UserCompKinds.insert(K);
       if (KindStr == Inst::getKindName(Inst::Const)) // Special case
         Kinds.push_back(Inst::Const);
+      else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
+        continue; // handled in addZSTComps
       else if (K == Inst::Kind(~0))
         report_fatal_error("unknown instruction: " + KindStr + "\n");
       else if (UnsupportedCompKinds.count(K))
@@ -282,9 +284,6 @@ void InstSynthesis::setCompLibrary() {
                  << " or run out of memory\n";
     Comps = CompLibrary;
   }
-  // Adjust the maximum number of components to use
-  if (MaxCompNum > Comps.size())
-    MaxCompNum = Comps.size();
 }
 
 void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
@@ -299,7 +298,6 @@ void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
   getInputVars(LHS, Tmp);
   // Remove duplicates
   std::set<Inst *> TmpSet;
-  std::vector<Inst *> Inputs;
   for (auto I : Tmp)
     if (TmpSet.insert(I).second)
       Inputs.push_back(I);
@@ -317,16 +315,57 @@ void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
     LocInstMap[LocVarStr] = std::make_pair(In, Loc);
     // Update CompInstMap map with concrete Inst
     CompInstMap[In] = Inputs[J];
-    // Set the DefaultInstWidth of component instances to the max width
-    // seen in input variables
-    if (Inputs[J]->Width > DefaultInstWidth)
-      DefaultInstWidth = Inputs[J]->Width;
   }
+}
+
+void InstSynthesis::setDefaultWidth(Inst *LHS) {
+  // Set the DefaultWidth of component instances to the max width seen in inputs
+  for (auto In : Inputs)
+    if (In->Width > DefaultWidth)
+      DefaultWidth = In->Width;
   // No inputs, use output width
-  if (!DefaultInstWidth)
-    DefaultInstWidth = LHS->Width;
-  N = I.size();
-  M = Comps.size() + N;
+  if (!DefaultWidth)
+    DefaultWidth = LHS->Width;
+}
+
+void InstSynthesis::addZSTComps(Inst *LHS) {
+  bool TestMode = CmdUserCompKinds.size() ? true : false;
+
+  // Extend some inputs to DefaultWidth
+  for (auto In : Inputs) {
+    if (In->Width < DefaultWidth) {
+      if (TestMode) {
+        if (UserCompKinds.count(Inst::ZExt))
+          Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {In->Width}});
+        if (UserCompKinds.count(Inst::SExt))
+          Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {In->Width}});
+      } else {
+        Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {In->Width}});
+        Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {In->Width}});
+      }
+    }
+  }
+  // It's common to extend from i1 (e.g. icmp output) to bigger iN before return
+  if (DefaultWidth > 1) {
+    if (TestMode) {
+      if (UserCompKinds.count(Inst::ZExt))
+        Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
+      if (UserCompKinds.count(Inst::SExt))
+        Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
+    } else {
+      Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
+      Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
+    }
+  }
+  // Sometimes the result is truncated to some smaller iN
+  if (DefaultWidth > LHS->Width) {
+    if (TestMode) {
+      if (UserCompKinds.count(Inst::Trunc))
+        Comps.emplace_back(Component{Inst::Trunc, LHS->Width, {DefaultWidth}});
+    } else {
+      Comps.emplace_back(Component{Inst::Trunc, LHS->Width, {DefaultWidth}});
+    }
+  }
 }
 
 void InstSynthesis::initComponents(InstContext &IC) {
@@ -335,7 +374,7 @@ void InstSynthesis::initComponents(InstContext &IC) {
     std::string LocVarStr;
     // First, init component inputs
     std::vector<Inst *> CompOps;
-    for (unsigned K = 0; K < Comp.OpNum; ++K) {
+    for (unsigned K = 0; K < Comp.OpWidths.size(); ++K) {
       LocVar In = std::make_pair(J+1, K+1);
       LocVarStr = getLocVarStr(In, LOC_PREFIX);
       Inst *Loc = IC.createVar(LocInstWidth, LocVarStr);
@@ -344,15 +383,10 @@ void InstSynthesis::initComponents(InstContext &IC) {
       P.emplace_back(In, Loc);
       // Create concrete component input encoded as a fresh variable
       LocVarStr = getLocVarStr(In, COMP_INPUT_PREFIX);
-      // Set op width for some special instructions.
-      // Inst::Select's first op always has width 1
-      if (Comp.Kind == Inst::Select && K == 0)
-        Loc = IC.createVar(1, LocVarStr);
-      // ZExt/SExt: extension from i1 only
-      else if (Comp.Kind == Inst::ZExt || Comp.Kind == Inst::SExt)
-        Loc = IC.createVar(1, LocVarStr);
+      if (Comp.OpWidths[K] != 0)
+        Loc = IC.createVar(Comp.OpWidths[K], LocVarStr);
       else
-        Loc = IC.createVar(DefaultInstWidth, LocVarStr);
+        Loc = IC.createVar(DefaultWidth, LocVarStr);
       LocInstMap[LocVarStr] = std::make_pair(In, Loc);
       // Update CompInstMap map with concrete Inst
       CompInstMap[In] = Loc;
@@ -369,7 +403,7 @@ void InstSynthesis::initComponents(InstContext &IC) {
 
     // Third, instantiate the component (aka Inst)
     if (!Comp.Width)
-      Comp.Width = DefaultInstWidth;
+      Comp.Width = DefaultWidth;
     if (Comp.Kind == Inst::Const) {
       LocVarStr = getLocVarStr(Out, CONST_PREFIX);
       // Special case: create one Const component with width
@@ -410,11 +444,11 @@ void InstSynthesis::printInitInfo() {
     llvm::outs() << "number of components to use: " << MaxCompNum << "\n";
   else
     llvm::outs() << "number of components to use: " << Comps.size() << "\n";
-  llvm::outs() << "default instruction width: " << DefaultInstWidth << "\n";
+  llvm::outs() << "default instruction width: " << DefaultWidth << "\n";
   llvm::outs() << "component library: ";
   for (auto const &Comp : Comps)
     llvm::outs() << Inst::getKindName(Comp.Kind)
-                 << " (" << Comp.Width << ", " << Comp.OpNum << "); ";
+                 << " (" << Comp.Width << ", " << Comp.OpWidths.size() << "); ";
   llvm::outs() << "\n";
   llvm::outs() << "instantiated components (unordered): ";
   for (auto const &E : CompInstMap) {
@@ -682,7 +716,8 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
     if (DebugSynthesis)
       llvm::outs() << "false\n";
     // Add to result
-    Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
+    if (Ante != IC.getConst(APInt(1, false)))
+      Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
   }
 
   return Ret;
@@ -853,7 +888,7 @@ Inst *InstSynthesis::createInstFromWiring(
   // Grab the target component
   Component Comp = Comps[OutLoc.first-1];
   assert(OutLoc.first >= 1 && "invalid component location variable");
-  assert((Ops.size() == Comp.OpNum) && "op num mismatch");
+  assert((Ops.size() == Comp.OpWidths.size()) && "op num mismatch");
   if (DebugSynthesis)
     llvm::outs() << "- creating inst " << Inst::getKindName(Comp.Kind)
                  << ", width " << Comp.Width << "\n";
@@ -1035,6 +1070,8 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::Trunc: {
     if (Width == Ops[0]->Width)
       return Ops[0];
+    if (Ops[0]->K == Inst::Const)
+      return IC.getConst(APInt(Width, Ops[0]->Val.getZExtValue()));
     break;
   }
 
@@ -1124,7 +1161,7 @@ std::vector<LocVar> InstSynthesis::getOpLocs(const LocVar &Loc) {
     return Res;
   assert(Loc.first >= 1 && "invalid locatoin variable");
   auto const &Comp = Comps[Loc.first-1];
-  for (unsigned J = 0; J < Comp.OpNum; ++J) {
+  for (unsigned J = 0; J < Comp.OpWidths.size(); ++J) {
     LocVar Tmp = std::make_pair(Loc.first, J+1);
     assert(CompInstMap.count(Tmp) && "unknown comp input's location variable");
     Res.push_back(Tmp);

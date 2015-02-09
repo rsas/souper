@@ -74,7 +74,7 @@ typedef std::pair<LocVar, Inst *> LocInst;
 struct Component {
   Inst::Kind Kind;
   unsigned Width;
-  unsigned OpNum;
+  std::vector<unsigned> OpWidths;
 };
 
 /// Unsupported components kinds
@@ -94,43 +94,37 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 /// indicate this by setting the Width to 0. During initialization, the width
 /// will be set to the DefaultInstWidth (maximum width of the input vars).
 static const std::vector<Component> CompLibrary = {
-  Component{Inst::Const, 0, 0},
+  Component{Inst::Const, 0, {}},
   //
-  Component{Inst::Add, 0, 2},
-  Component{Inst::Sub, 0, 2},
-  Component{Inst::Mul, 0, 2},
-  Component{Inst::UDiv, 0, 2},
-  Component{Inst::SDiv, 0, 2},
-  Component{Inst::UDivExact, 0, 2},
-  Component{Inst::SDivExact, 0, 2},
-  Component{Inst::URem, 0, 2},
-  Component{Inst::SRem, 0, 2},
-  Component{Inst::And, 0, 2},
-  Component{Inst::Or, 0, 2},
-  Component{Inst::Xor, 0, 2},
-  Component{Inst::Shl, 0, 2},
-  Component{Inst::LShr, 0, 2},
-  Component{Inst::LShrExact, 0, 2},
-  Component{Inst::AShr, 0, 2},
-  Component{Inst::AShrExact, 0, 2},
-  Component{Inst::Select, 0, 3},
+  Component{Inst::Add, 0, {0,0}},
+  Component{Inst::Sub, 0, {0,0}},
+  Component{Inst::Mul, 0, {0,0}},
+  Component{Inst::UDiv, 0, {0,0}},
+  Component{Inst::SDiv, 0, {0,0}},
+  Component{Inst::UDivExact, 0, {0,0}},
+  Component{Inst::SDivExact, 0, {0,0}},
+  Component{Inst::URem, 0, {0,0}},
+  Component{Inst::SRem, 0, {0,0}},
+  Component{Inst::And, 0, {0,0}},
+  Component{Inst::Or, 0, {0,0}},
+  Component{Inst::Xor, 0, {0,0}},
+  Component{Inst::Shl, 0, {0,0}},
+  Component{Inst::LShr, 0, {0,0}},
+  Component{Inst::LShrExact, 0, {0,0}},
+  Component{Inst::AShr, 0, {0,0}},
+  Component{Inst::AShrExact, 0, {0,0}},
+  Component{Inst::Select, 0, {1,0,0}},
+  Component{Inst::Eq, 1, {0,0}},
+  Component{Inst::Ne, 1, {0,0}},
+  Component{Inst::Ult, 1, {0,0}},
+  Component{Inst::Slt, 1, {0,0}},
+  Component{Inst::Ule, 1, {0,0}},
+  Component{Inst::Sle, 1, {0,0}},
   //
-  Component{Inst::ZExt, 0, 1},
-  Component{Inst::SExt, 0, 1},
-  //
-  Component{Inst::Trunc, 1, 1},
-  //
-  Component{Inst::Eq, 1, 2},
-  Component{Inst::Ne, 1, 2},
-  Component{Inst::Ult, 1, 2},
-  Component{Inst::Slt, 1, 2},
-  Component{Inst::Ule, 1, 2},
-  Component{Inst::Sle, 1, 2},
-  //
-  Component{Inst::CtPop, 0, 1},
-  Component{Inst::BSwap, 0, 1},
-  Component{Inst::Cttz, 0, 1},
-  Component{Inst::Ctlz, 0, 1}
+  Component{Inst::CtPop, 0, {0}},
+  Component{Inst::BSwap, 0, {0}},
+  Component{Inst::Cttz, 0, {0}},
+  Component{Inst::Ctlz, 0, {0}}
 };
 
 class InstSynthesis {
@@ -147,12 +141,16 @@ public:
 private:
   /// Components to be used
   std::vector<Component> Comps;
+  /// User supplied components kinds
+  std::set<Inst::Kind> UserCompKinds;
   /// Max number of components in the synthesized result.
   ///   <0 -> use all available components in the library.
   ///    0 -> do nop synthesis (no components, use just inputs).
   ///   >0 -> use the number of specified components.
   /// Note that Const inst comprises several components with different widths
   int MaxCompNum;
+  /// Program inputs
+  std::vector<Inst *> Inputs;
   /// Input location set I
   std::vector<LocInst> I;
   /// Component input location set P
@@ -171,7 +169,7 @@ private:
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
   /// Default component inst width
-  unsigned DefaultInstWidth = 0;
+  unsigned DefaultWidth = 0;
   /// LocInst width is fixed
   const unsigned LocInstWidth = 32;
   /// A mapping from a location variable's string representation to its location.
@@ -188,6 +186,13 @@ private:
 
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
+
+  /// Set default component inst width
+  void setDefaultWidth(Inst *LHS);
+
+  /// Add extra width manipulations components (zext/sext/trunc)
+  /// to handle varying input/output widths
+  void addZSTComps(Inst *LHS);
 
   /// Initalize components' input locations, output locations,
   /// and components' concrete instruction instances
