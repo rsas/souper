@@ -331,7 +331,7 @@ void InstSynthesis::setDefaultWidth(Inst *LHS) {
 void InstSynthesis::addZSTComps(Inst *LHS) {
   bool TestMode = CmdUserCompKinds.size() ? true : false;
 
-  // Extend some inputs to DefaultWidth
+  // Extend all inputs to DefaultWidth
   for (auto In : Inputs) {
     if (In->Width < DefaultWidth) {
       if (TestMode) {
@@ -345,19 +345,41 @@ void InstSynthesis::addZSTComps(Inst *LHS) {
       }
     }
   }
-  // It's common to extend from i1 (e.g. icmp output) to bigger iN before return
+  // It's common to extend from i1 (e.g. icmp output) to bigger iN
   if (DefaultWidth > 1) {
     if (TestMode) {
-      if (UserCompKinds.count(Inst::ZExt))
+      if (UserCompKinds.count(Inst::ZExt)) {
         Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
-      if (UserCompKinds.count(Inst::SExt))
+        if (DefaultWidth != LHS->Width && LHS->Width > 1)
+          Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {1}});
+      }
+      if (UserCompKinds.count(Inst::SExt)) {
         Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
+        if (DefaultWidth != LHS->Width && LHS->Width > 1)
+          Comps.emplace_back(Component{Inst::SExt, LHS->Width, {1}});
+      }
     } else {
       Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
       Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
+      if (DefaultWidth != LHS->Width && LHS->Width > 1) {
+        Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {1}});
+        Comps.emplace_back(Component{Inst::SExt, LHS->Width, {1}});
+      }
     }
   }
-  // Sometimes the result is truncated to some smaller iN
+  // Sometimes the result is extended to bigger output iN
+  if (DefaultWidth < LHS->Width) {
+    if (TestMode) {
+      if (UserCompKinds.count(Inst::ZExt))
+        Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {DefaultWidth}});
+      if (UserCompKinds.count(Inst::SExt))
+        Comps.emplace_back(Component{Inst::SExt, LHS->Width, {DefaultWidth}});
+    } else {
+      Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {DefaultWidth}});
+      Comps.emplace_back(Component{Inst::SExt, LHS->Width, {DefaultWidth}});
+    }
+  }
+  // Sometimes the result is truncated to smaller output iN
   if (DefaultWidth > LHS->Width) {
     if (TestMode) {
       if (UserCompKinds.count(Inst::Trunc))
