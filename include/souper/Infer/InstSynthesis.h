@@ -92,7 +92,7 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 /// Supported component library.
 /// The width of most of the instructions is unknown in advance, therefore, we
 /// indicate this by setting the Width to 0. During initialization, the width
-/// will be set to the DefaultInstWidth (maximum width of the input vars).
+/// will be set to the DefaultWidth (maximum width of the input vars).
 static const std::vector<Component> CompLibrary = {
   Component{Inst::Const, 0, {}},
   //
@@ -129,8 +129,6 @@ static const std::vector<Component> CompLibrary = {
 
 class InstSynthesis {
 public:
-  InstSynthesis();
-
   // Synthesize an instruction for the specification in LHS
   std::error_code synthesize(SMTLIBSolver *SMTSolver,
                              const BlockPCs &BPCs,
@@ -143,12 +141,6 @@ private:
   std::vector<Component> Comps;
   /// User supplied components kinds
   std::set<Inst::Kind> UserCompKinds;
-  /// Max number of components in the synthesized result.
-  ///   <0 -> use all available components in the library.
-  ///    0 -> do nop synthesis (no components, use just inputs).
-  ///   >0 -> use the number of specified components.
-  /// Note that Const inst comprises several components with different widths
-  int MaxCompNum;
   /// Program inputs
   std::vector<Inst *> Inputs;
   /// Input location set I
@@ -229,10 +221,11 @@ private:
   Inst *getAcyclicityConstraint(InstContext &IC);
 
   /// phi_P: Forall x in P \cup I: 0 <= l_x <= M-1
-  /// phi_R: Forall x in R \cup {O}: |N| <= l_x <= M-1
-  /// If MaxCompNum >= 0, then
-  /// phi_R: Forall x in R \cup {O}: |N| <= l_x <= |N|+MaxCompNum
+  /// phi_R: Forall x in R: |N| <= l_x <= M-1
   Inst *getLocVarConstraint(InstContext &IC);
+
+  /// Min <= O <= Max
+  Inst *getCompNumConstraint(unsigned Min, unsigned Max, InstContext &IC);
 
   /// Each component's input should be wired either to an input
   /// or to a component's output

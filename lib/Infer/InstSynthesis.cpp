@@ -25,10 +25,6 @@ namespace {
 static cl::opt<bool> DebugSynthesis("souper-debug-synthesis",
     cl::desc("Debug instruction synthesis (default=false)"),
     cl::init(false));
-static cl::opt<int> CmdMaxComps("souper-synthesis-comp-num",
-    cl::Hidden,
-    cl::desc("Maximum number of components (default=all)"),
-    cl::init(-1));
 static cl::opt<std::string> CmdUserCompKinds("souper-synthesis-comps",
     cl::Hidden,
     cl::desc("Comma-separated list of instruction synthesis component kinds"),
@@ -48,10 +44,6 @@ static const std::string LOC_SEP = "_";
 static const std::string COMP_INPUT_PREFIX = "compin_";
 static const std::string CONST_PREFIX = "const_";
 
-InstSynthesis::InstSynthesis()
-      : MaxCompNum(CmdMaxComps >= 0 ? CmdMaxComps : -1) {
-}
-
 std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                                           const BlockPCs &BPCs,
                                           const std::vector<InstMapping> &PCs,
@@ -59,8 +51,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                                           unsigned Timeout) {
   std::error_code EC;
   RHS = 0;
-  int LHSCost = cost(LHS);
 
+  // The order is important
   setCompLibrary();
   initInputVars(LHS, IC);
   setDefaultWidth(LHS);
@@ -69,20 +61,19 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   initComponents(IC);
   initLocations();
 
-  // Adjust the maximum number of components
-  if (MaxCompNum > Comps.size())
-    MaxCompNum = Comps.size();
   N = I.size();
   M = Comps.size() + N;
+
+  int LHSCost = cost(LHS);
 
   if (DebugSynthesis)
     printInitInfo();
 
   setInvalidWirings();
 
-  // Init a new set of path conditions.
-  std::vector<InstMapping> NewPCs;
-  addConstraints(NewPCs, IC);
+  // Init a new set of path conditions
+  std::vector<InstMapping> WiringPCs;
+  addConstraints(WiringPCs, IC);
 
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint(IC);
@@ -97,10 +88,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   std::map<std::string, Inst *> InputNameMap;
   std::map<Inst *, Inst *> InitialInputs;
 
-  // Figure out valid initial inputs
+  // Figure out valid initial inputs if PCs/BPCs are available
   if (PCs.size() || BPCs.size()) {
-    // Create initial inputs by asking a solver for an arbitrary solution
-    // that satisfies BPCs/PCs
+    // Ask the solver for an arbitrary solution that satisfies BPCs/PCs
     std::vector<Inst *> ModelInsts;
     std::vector<llvm::APInt> ModelVals;
     InstMapping Mapping(LHS, IC.createVar(LHS->Width, "foo"));
@@ -122,153 +112,158 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       }
     }
   } else {
-    // TODO: add more edge cases (e.g., INT_MIN, INT_MAX etc.)
     for (auto Input : Inputs) {
         InputNameMap[Input->Name] = Input;
+        // TODO: add more edge cases (e.g., INT_MIN, INT_MAX etc.)
+        // to converge faster
         InitialInputs[Input] = IC.getConst(APInt(Input->Width, 0));
     }
   }
-  S.push_back(InitialInputs);
 
-  // --------------------------------------------------------------------------
-  // -------------- Counterexample driven synthesis loop ----------------------
-  // --------------------------------------------------------------------------
-  if (DebugSynthesis)
-    llvm::outs() << "starting synthesis\n";
-  unsigned Rounds = 0;
-  while (true) {
-    Inst *Query = IC.getConst(APInt(1, true));
-    // Each set of concrete inputs is used in a separate copy of the
-    // main WiringQuery. For correct separation of these copies, we must
-    // copy all component input variables that encode data-flow in the
-    // program too (starting with the second concrete input set, see below)
-    for (auto const &InputMap : S) {
-      if (DebugSynthesis) {
-        for (auto const &Input : InputMap) {
-          if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
-            continue;
-          llvm::outs() << "setting input " << Input.first->Name
-                       << " to " << Input.second->Val << "\n";
-        }
-        llvm::outs() << "----\n";
-      }
-      Inst *Copy = getInstCopy(WiringQuery, IC, InputMap);
-      Query = IC.getInst(Inst::And, 1, {Query, Copy});
-    }
-    // Solve the synthesis constraint.
-    // Each solution corresponds to a syntactically distinct and well-formed
-    // straight-line program obtained by composition of given components
-    std::vector<Inst *> ModelInsts;
-    std::vector<llvm::APInt> ModelVals;
-    InstMapping Mapping(Query, IC.getConst(APInt(1, true)));
-    // Negate the query to get a SAT model.
-    // Don't use original BPCs/PCs, they are useless
-    std::string QueryStr = BuildQuery({}, NewPCs, Mapping,
-                                      &ModelInsts, /*Negate=*/true);
-    bool IsSat;
-    EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
-                                  &ModelVals, Timeout);
-    // Fail on error or when no valid wiring exists
-    if (EC || !IsSat)
-      return EC;
-
-    if (DebugSynthesis)
-      llvm::outs() << "round: " << Rounds << "\n";
-    Rounds++;
-
-    std::vector<std::pair<LocInst, LocInst>> Wiring;
-    Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
-                                     Wiring, IC);
-    if (!Cand) {
-      llvm::errs() << "synthesis bug: creating inst from a model failed\n";
-      return EC;
-    }
-
-    if (DebugSynthesis) {
-      llvm::outs() << "candidate:\n";
-      ReplacementContext Context;
-      PrintReplacementRHS(llvm::outs(), Cand, Context);
-    }
-
-    // Is it worth it to check this candidate at all?
-    if ((LHSCost - cost(Cand) < 1) && !IgnoreCost) {
-      if (DebugSynthesis)
-        llvm::outs() << "Cand is too expensive " << cost(Cand)
-                     << " >= " << LHSCost << "\n";
-      Inst *Ante = IC.getConst(APInt(1, true));
-      for (auto const &Pair : Wiring) {
-        auto const &L_x = Pair.first;
-        auto const &L_y = Pair.second;
-        Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
-        Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
-      }
-      NewPCs.emplace_back(Ante, IC.getConst(APInt(1, true)));
+  // Iterative synthesis loop with increasing number of components
+  unsigned MaxCompNum = IgnoreCost ? M : LHSCost;
+  for (unsigned CompNum = 0; CompNum <= MaxCompNum; CompNum++) {
+    Inst *CompConstraint;
+    // If synthesis using 0 components failed (aka nop synthesis),
+    // don't subsequently wire the output to the input(s)
+    if (CompNum == 0)
+      CompConstraint = getCompNumConstraint(0, N, IC);
+    else if (CompNum > N)
+      CompConstraint = getCompNumConstraint(N, CompNum, IC);
+    else
       continue;
-    }
 
-    // Does the candidate work for all inputs?
-    // Use original BPCs/PCs
-    ModelInsts.clear();
-    ModelVals.clear();
-    InstMapping CandMapping(LHS, Cand);
-    QueryStr = BuildQuery(BPCs, PCs, CandMapping, &ModelInsts, /*Negate=*/false);
-    EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
-                                  &ModelVals, Timeout);
-    if (EC)
-      return EC;
+    // Init initial inputs
+    S = { InitialInputs };
+    // Init fresh loop PCs
+    std::vector<InstMapping> LoopPCs = WiringPCs;
+    LoopPCs.emplace_back(CompConstraint, IC.getConst(APInt(1, true)));
 
-    // Success
-    if (!IsSat) {
-      if (DebugSynthesis)
-        llvm::outs() << "synthesis succeeded\n";
-      RHS = Cand;
-      return EC;
-    }
-
-    // Constants are not constrained by the inputs, thus, we must forbid the
-    // invalid locations explicitly. Similarly, if an input is wired to the output
-    // and is identified as invalid, we must skip it's location in the future too.
-    // However, some constants result from junk-removal, don't forbid these
-    if ((Cand->K == Inst::Const && LocInstMap.count(Cand->Name)) ||
-        Cand->K == Inst::Var) {
-      assert(LocInstMap.count(Cand->Name) && "unknown var candidate location");
-      Inst *Ne = IC.getInst(Inst::Ne, 1, {LocInstMap[Cand->Name].second, O.second});
-      NewPCs.emplace_back(Ne, IC.getConst(APInt(1, true)));
-    }
-
+    // --------------------------------------------------------------------------
+    // -------------- Counterexample driven synthesis loop ----------------------
+    // --------------------------------------------------------------------------
     if (DebugSynthesis)
-      llvm::outs() << "didn't work for all inputs, counterexample(s):\n";
-    // Parse input counterexamples from the model
-    std::map<Inst *, Inst *> Replacements;
-    for (unsigned J = 0; J != ModelInsts.size(); ++J) {
-      auto Name = ModelInsts[J]->Name;
-      if (InputNameMap.count(Name)) {
-        auto In = InputNameMap[Name];
-        auto Val = ModelVals[J];
-        Replacements[In] = IC.getConst(Val);
+      llvm::outs() << "synthesizing using " << CompNum << " comps\n";
+    unsigned Refinements = 0;
+    while (true) {
+      Inst *Query = IC.getConst(APInt(1, true));
+      // Each set of concrete inputs is used in a separate copy of the
+      // main WiringQuery. For correct separation of these copies, we must
+      // copy all component input variables that encode data-flow in the
+      // program too (starting with the second concrete input set, see below)
+      for (auto const &InputMap : S) {
+        if (DebugSynthesis) {
+          for (auto const &Input : InputMap) {
+            if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
+              continue;
+            llvm::outs() << "setting input " << Input.first->Name
+                         << " to " << Input.second->Val << "\n";
+          }
+          llvm::outs() << "----\n";
+        }
+        Inst *Copy = getInstCopy(WiringQuery, IC, InputMap);
+        Query = IC.getInst(Inst::And, 1, {Query, Copy});
+      }
+      // Solve the synthesis constraint.
+      // Each solution corresponds to a syntactically distinct and well-formed
+      // straight-line program obtained by composition of given components
+      std::vector<Inst *> ModelInsts;
+      std::vector<llvm::APInt> ModelVals;
+      InstMapping Mapping(Query, IC.getConst(APInt(1, true)));
+      // Negate the query to get a SAT model.
+      // Don't use original BPCs/PCs, they are useless
+      std::string QueryStr = BuildQuery({}, LoopPCs, Mapping,
+                                        &ModelInsts, /*Negate=*/true);
+      bool IsSat;
+      EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                    &ModelVals, Timeout);
+      if (EC)
+        return EC;
+
+      // No valid wiring exists for the target comp number
+      if (!IsSat)
+        break;
+
+      std::vector<std::pair<LocInst, LocInst>> Wiring;
+      Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
+                                       Wiring, IC);
+      if (!Cand) {
+        llvm::errs() << "synthesis bug: creating inst from a model failed\n";
+        return EC;
+      }
+
+      if (DebugSynthesis) {
+        llvm::outs() << "candidate:\n";
+        ReplacementContext Context;
+        PrintReplacementRHS(llvm::outs(), Cand, Context);
+      }
+
+      // Does the candidate work for all inputs?
+      // Use original BPCs/PCs
+      ModelInsts.clear();
+      ModelVals.clear();
+      InstMapping CandMapping(LHS, Cand);
+      QueryStr = BuildQuery(BPCs, PCs, CandMapping, &ModelInsts, /*Negate=*/false);
+      EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                    &ModelVals, Timeout);
+      if (EC)
+        return EC;
+
+      // Success
+      if (!IsSat) {
         if (DebugSynthesis)
-          llvm::outs() << Name << " = " << Val << "\n";
+          llvm::outs() << "synthesis succeeded using " << CompNum-1 << " comps "
+                       << "(LHS cost: " << LHSCost << ")\n";
+        RHS = Cand;
+        return EC;
       }
-    }
-    // Copy component input variables for query separation
-    for (auto const &E : LocInstMap) {
-      if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
-        auto In = E.second.second;
-        std::string Name = E.first + LOC_SEP + std::to_string(Rounds);
-        Replacements[In] = IC.createVar(In->Width, Name);
+
+      Refinements++;
+      if (DebugSynthesis)
+        llvm::outs() << "refinement: " << Refinements << "\n";
+
+      // Constants are not constrained by the inputs, thus, we must forbid the
+      // invalid locations explicitly. Similarly, if an input is wired to the output
+      // and is identified as invalid, we must skip it's location in the future too.
+      // However, some constants result from junk-removal, don't forbid these
+      if ((Cand->K == Inst::Const && LocInstMap.count(Cand->Name)) ||
+          Cand->K == Inst::Var) {
+        assert(LocInstMap.count(Cand->Name) && "unknown var candidate location");
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {LocInstMap[Cand->Name].second, O.second});
+        LoopPCs.emplace_back(Ne, IC.getConst(APInt(1, true)));
       }
+
+      if (DebugSynthesis)
+        llvm::outs() << "didn't work for all inputs, counterexample(s):\n";
+      // Parse input counterexamples from the model
+      std::map<Inst *, Inst *> Replacements;
+      for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+        auto Name = ModelInsts[J]->Name;
+        if (InputNameMap.count(Name)) {
+          auto In = InputNameMap[Name];
+          auto Val = ModelVals[J];
+          Replacements[In] = IC.getConst(Val);
+          if (DebugSynthesis)
+            llvm::outs() << Name << " = " << Val << "\n";
+        }
+      }
+      // Copy component input variables for query separation
+      for (auto const &E : LocInstMap) {
+        if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
+          auto In = E.second.second;
+          std::string Name = E.first + LOC_SEP + std::to_string(Refinements);
+          Replacements[In] = IC.createVar(In->Width, Name);
+        }
+      }
+      // Add replacements to S
+      S.push_back(Replacements);
     }
-    // Add replacements to S
-    S.push_back(Replacements);
   }
-  assert(0 && "unreachable");
 
   return EC;
 }
 
 void InstSynthesis::setCompLibrary() {
-  if (!MaxCompNum)
-    return;
   if (CmdUserCompKinds.size()) {
     std::vector<Inst::Kind> Kinds;
     // Parse user-provided component kind strings
@@ -474,10 +469,7 @@ void InstSynthesis::initLocations() {
 
 void InstSynthesis::printInitInfo() {
   llvm::outs() << "number of inputs (N): " << N << ", M = " << M << "\n";
-  if (MaxCompNum >= 0)
-    llvm::outs() << "number of components to use: " << MaxCompNum << "\n";
-  else
-    llvm::outs() << "number of components to use: " << Comps.size() << "\n";
+  llvm::outs() << "number of components to use: " << Comps.size() << "\n";
   llvm::outs() << "default instruction width: " << DefaultWidth << "\n";
   llvm::outs() << "component library: ";
   for (auto const &Comp : Comps)
@@ -644,45 +636,54 @@ Inst *InstSynthesis::getLocVarConstraint(InstContext &IC) {
                  {L_x.second, IC.getConst(APInt(L_x.second->Width, 0))});
     Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, false))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
+
     Ult = IC.getInst(Inst::Ult, 1,
                      {L_x.second, IC.getConst(APInt(L_x.second->Width, M))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
   }
 
-  // All outputs
-  Tmp.clear();
-  Tmp.insert(Tmp.end(), R.begin(), R.end());
-  Tmp.push_back(O);
-  for (auto const &L_x : Tmp) {
+  // All component outputs
+  for (auto const &L_x : R) {
     Inst *Ult = 0;
-    if (L_x == O) {
-      Ult = IC.getInst(Inst::Ult, 1,
-                       {L_x.second, IC.getConst(APInt(L_x.second->Width, 0))});
-      if (DebugSynthesis)
-        llvm::outs() << "0 <= " << getLocVarStr(L_x.first);
-    } else {
-      Ult = IC.getInst(Inst::Ult, 1,
-                       {L_x.second, IC.getConst(APInt(L_x.second->Width, N))});
-      if (DebugSynthesis)
-        llvm::outs() << N << " <= " << getLocVarStr(L_x.first);
-    }
+    Ult = IC.getInst(Inst::Ult, 1,
+                     {L_x.second, IC.getConst(APInt(L_x.second->Width, N))});
+    if (DebugSynthesis)
+      llvm::outs() << N << " <= " << getLocVarStr(L_x.first);
     Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, false))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
-    if (MaxCompNum >= 0 && L_x == O) {
-      Ult = IC.getInst(Inst::Ult, 1, {L_x.second,
-                                      IC.getConst(APInt(L_x.second->Width,
-                                                  N+MaxCompNum))});
-      if (DebugSynthesis)
-        llvm::outs() << " < " << N+MaxCompNum << "\n";
-    } else {
-      Ult = IC.getInst(Inst::Ult, 1, {L_x.second,
-                                      IC.getConst(APInt(L_x.second->Width,
-                                                  M))});
-      if (DebugSynthesis)
-        llvm::outs() << " < " << M << "\n";
-    }
+
+    Ult = IC.getInst(Inst::Ult, 1, {L_x.second,
+                                    IC.getConst(APInt(L_x.second->Width,
+                                                M))});
+    if (DebugSynthesis)
+      llvm::outs() << " < " << M << "\n";
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
   }
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getCompNumConstraint(unsigned Min, unsigned Max,
+                                          InstContext &IC) {
+  Inst *Ret = IC.getConst(APInt(1, true));
+
+  if (DebugSynthesis)
+    llvm::outs() << "max comp num constraint [" << Min << ", " << Max << "):\n";
+
+  Inst *Ult = IC.getInst(Inst::Ult, 1,
+                         {O.second, IC.getConst(APInt(O.second->Width, Min))});
+  if (DebugSynthesis)
+    llvm::outs() << Min << " <= " << getLocVarStr(O.first);
+
+  Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, false))});
+  Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
+
+  Ult = IC.getInst(Inst::Ult, 1, {O.second,
+                                  IC.getConst(APInt(O.second->Width,
+                                              Max))});
+  if (DebugSynthesis)
+    llvm::outs() << " < " << Max << "\n";
+  Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
 
   return Ret;
 }
