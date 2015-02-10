@@ -96,26 +96,36 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // This mapping is required during model parsing
   std::map<std::string, Inst *> InputNameMap;
   std::map<Inst *, Inst *> InitialInputs;
-  // Create initial inputs by asking a solver for an arbitrary solution
-  // that satisfies BPCs/PCs
-  std::vector<Inst *> ModelInsts;
-  std::vector<llvm::APInt> ModelVals;
-  InstMapping Mapping(LHS, IC.createVar(LHS->Width, "foo"));
-  // Negate the query to get a SAT model
-  std::string QueryStr = BuildQuery(BPCs, PCs, Mapping,
-                                    &ModelInsts, /*Negate=*/true);
-  bool IsSat;
-  EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
-                                &ModelVals, Timeout);
-  if (EC || !IsSat)
-    return EC;
 
-  for (unsigned J = 0; J != ModelInsts.size(); ++J) {
-    auto Name = ModelInsts[J]->Name;
-    if (Name.find(INPUT_PREFIX) != std::string::npos) {
-      auto Input = ModelInsts[J];
-      InputNameMap[Name] = Input;
-      InitialInputs[Input] = IC.getConst(ModelVals[J]);
+  // Figure out valid initial inputs
+  if (PCs.size() || BPCs.size()) {
+    // Create initial inputs by asking a solver for an arbitrary solution
+    // that satisfies BPCs/PCs
+    std::vector<Inst *> ModelInsts;
+    std::vector<llvm::APInt> ModelVals;
+    InstMapping Mapping(LHS, IC.createVar(LHS->Width, "foo"));
+    // Negate the query to get a SAT model
+    std::string QueryStr = BuildQuery(BPCs, PCs, Mapping,
+                                      &ModelInsts, /*Negate=*/true);
+    bool IsSat;
+    EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                  &ModelVals, Timeout);
+    if (EC || !IsSat)
+      return EC;
+
+    for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+      auto Name = ModelInsts[J]->Name;
+      if (Name.find(INPUT_PREFIX) != std::string::npos) {
+        auto Input = ModelInsts[J];
+        InputNameMap[Name] = Input;
+        InitialInputs[Input] = IC.getConst(ModelVals[J]);
+      }
+    }
+  } else {
+    // TODO: add more edge cases (e.g., INT_MIN, INT_MAX etc.)
+    for (auto Input : Inputs) {
+        InputNameMap[Input->Name] = Input;
+        InitialInputs[Input] = IC.getConst(APInt(Input->Width, 0));
     }
   }
   S.push_back(InitialInputs);
@@ -148,12 +158,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // Solve the synthesis constraint.
     // Each solution corresponds to a syntactically distinct and well-formed
     // straight-line program obtained by composition of given components
-    ModelInsts.clear();
-    ModelVals.clear();
+    std::vector<Inst *> ModelInsts;
+    std::vector<llvm::APInt> ModelVals;
     InstMapping Mapping(Query, IC.getConst(APInt(1, true)));
     // Negate the query to get a SAT model.
     // Don't use original BPCs/PCs, they are useless
-    QueryStr = BuildQuery({}, NewPCs, Mapping, &ModelInsts, /*Negate=*/true);
+    std::string QueryStr = BuildQuery({}, NewPCs, Mapping,
+                                      &ModelInsts, /*Negate=*/true);
+    bool IsSat;
     EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
                                   &ModelVals, Timeout);
     // Fail on error or when no valid wiring exists
