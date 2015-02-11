@@ -78,15 +78,12 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint(IC);
 
-  // Initial concrete input set S.
-  // With every new input set that proves a synthesised program is invalid,
-  // we'll have to copy WiringQuery and replace its inputs with the new
-  // concrete values from S
-  std::vector<std::map<Inst *, Inst *>> S;
   // A maping from a var's string to the actual instruction.
   // This mapping is required during model parsing
   std::map<std::string, Inst *> InputNameMap;
-  std::map<Inst *, Inst *> InitialInputs;
+  for (auto In : Inputs)
+      InputNameMap[In->Name] = In;
+  std::vector<std::map<Inst *, Inst *>> InitialInputs;
 
   // Figure out valid initial inputs if PCs/BPCs are available
   if (PCs.size() || BPCs.size()) {
@@ -103,21 +100,21 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     if (EC || !IsSat)
       return EC;
 
+    std::map<Inst *, Inst *> ConcreteInputs;
     for (unsigned J = 0; J != ModelInsts.size(); ++J) {
       auto Name = ModelInsts[J]->Name;
       if (Name.find(INPUT_PREFIX) != std::string::npos) {
         auto Input = ModelInsts[J];
-        InputNameMap[Name] = Input;
-        InitialInputs[Input] = IC.getConst(ModelVals[J]);
+        ConcreteInputs[Input] = IC.getConst(ModelVals[J]);
       }
     }
+    InitialInputs.push_back(ConcreteInputs);
   } else {
-    for (auto Input : Inputs) {
-        InputNameMap[Input->Name] = Input;
-        // TODO: add more edge cases (e.g., INT_MIN, INT_MAX etc.)
-        // to converge faster
-        InitialInputs[Input] = IC.getConst(APInt(Input->Width, 0));
-    }
+    // TODO: add more corner cases
+    std::map<Inst *, Inst *> ConcreteInputs;
+    for (auto In : Inputs)
+      ConcreteInputs[In] = IC.getConst(APInt::getNullValue(In->Width));
+    InitialInputs.push_back(ConcreteInputs);
   }
 
   // Iterative synthesis loop with increasing number of components
@@ -129,12 +126,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     if (CompNum == 0)
       CompConstraint = getCompNumConstraint(0, N, IC);
     else
-      continue;
-
-    // Init initial inputs
-    S = { InitialInputs };
+      CompConstraint = getCompNumConstraint(N, N+CompNum, IC);
+    // Initial concrete input set S.
+    // With every new input set that proves a synthesised program is invalid,
+    // we'll have to copy WiringQuery and replace its inputs with the new
+    // concrete values from S
+    auto S = InitialInputs;
     // Init fresh loop PCs
-    std::vector<InstMapping> LoopPCs = WiringPCs;
+    auto LoopPCs = WiringPCs;
     LoopPCs.emplace_back(CompConstraint, IC.getConst(APInt(1, true)));
 
     // --------------------------------------------------------------------------
@@ -145,9 +144,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       Inst *Query = IC.getConst(APInt(1, true));
       // Each set of concrete inputs is used in a separate copy of the
       // main WiringQuery. For correct separation of these copies, we must
-      // copy all component input variables that encode data-flow in the
-      // program too (starting with the second concrete input set, see below)
-      for (auto const &InputMap : S) {
+      // copy all component input variables that encode data-flow
+      for (unsigned J = 0; J < S.size(); J++) {
+        auto &InputMap = S[J];
         if (DebugSynthesis) {
           for (auto const &Input : InputMap) {
             if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
@@ -155,7 +154,17 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
             llvm::outs() << "setting input " << Input.first->Name
                          << " to " << Input.second->Val << "\n";
           }
-          llvm::outs() << "----\n";
+        }
+        // Starting with the second concrete input set,
+        // copy component input variables for query separation
+        if (J > 0) {
+          for (auto const &E : LocInstMap) {
+            if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
+              auto In = E.second.second;
+              std::string Name = E.first + LOC_SEP + std::to_string(Refinements);
+              InputMap[In] = IC.createVar(In->Width, Name);
+            }
+          }
         }
         Inst *Copy = getInstCopy(WiringQuery, IC, InputMap);
         Query = IC.getInst(Inst::And, 1, {Query, Copy});
@@ -241,14 +250,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
           Replacements[In] = IC.getConst(Val);
           if (DebugSynthesis)
             llvm::outs() << Name << " = " << Val << "\n";
-        }
-      }
-      // Copy component input variables for query separation
-      for (auto const &E : LocInstMap) {
-        if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
-          auto In = E.second.second;
-          std::string Name = E.first + LOC_SEP + std::to_string(Refinements);
-          Replacements[In] = IC.createVar(In->Width, Name);
         }
       }
       // Add replacements to S
@@ -661,9 +662,6 @@ Inst *InstSynthesis::getLocVarConstraint(InstContext &IC) {
 Inst *InstSynthesis::getCompNumConstraint(unsigned Min, unsigned Max,
                                           InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
-
-  if (DebugSynthesis)
-    llvm::outs() << "max comp num constraint [" << Min << ", " << Max << "):\n";
 
   Inst *Ult = IC.getInst(Inst::Ult, 1,
                          {O.second, IC.getConst(APInt(O.second->Width, Min))});
