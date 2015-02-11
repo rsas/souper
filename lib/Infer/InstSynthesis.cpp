@@ -121,15 +121,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   }
 
   // Iterative synthesis loop with increasing number of components
-  unsigned MaxCompNum = IgnoreCost ? M : LHSCost;
-  for (unsigned CompNum = 0; CompNum <= MaxCompNum; CompNum++) {
+  unsigned MaxCompNum = IgnoreCost ? M : LHSCost-1;
+  for (unsigned CompNum = 0; CompNum < MaxCompNum; CompNum++) {
     Inst *CompConstraint;
     // If synthesis using 0 components failed (aka nop synthesis),
     // don't subsequently wire the output to the input(s)
     if (CompNum == 0)
       CompConstraint = getCompNumConstraint(0, N, IC);
-    else if (CompNum > N)
-      CompConstraint = getCompNumConstraint(N, CompNum, IC);
     else
       continue;
 
@@ -142,8 +140,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // --------------------------------------------------------------------------
     // -------------- Counterexample driven synthesis loop ----------------------
     // --------------------------------------------------------------------------
-    if (DebugSynthesis)
-      llvm::outs() << "synthesizing using " << CompNum << " comps\n";
     unsigned Refinements = 0;
     while (true) {
       Inst *Query = IC.getConst(APInt(1, true));
@@ -212,7 +208,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       // Success
       if (!IsSat) {
         if (DebugSynthesis)
-          llvm::outs() << "synthesis succeeded using " << CompNum-1 << " comps "
+          llvm::outs() << "synthesis succeeded using " << CompNum+1 << " comps "
                        << "(LHS cost: " << LHSCost << ")\n";
         RHS = Cand;
         return EC;
@@ -469,7 +465,6 @@ void InstSynthesis::initLocations() {
 
 void InstSynthesis::printInitInfo() {
   llvm::outs() << "number of inputs (N): " << N << ", M = " << M << "\n";
-  llvm::outs() << "number of components to use: " << Comps.size() << "\n";
   llvm::outs() << "default instruction width: " << DefaultWidth << "\n";
   llvm::outs() << "component library: ";
   for (auto const &Comp : Comps)
