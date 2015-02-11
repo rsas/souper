@@ -27,6 +27,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/PassManager.h"
+#include "llvm/Support/CommandLine.h"
 #include "souper/Inst/Inst.h"
 #include "souper/Util/UniqueNameSet.h"
 #include <map>
@@ -34,6 +35,11 @@
 #include <sstream>
 #include <unordered_set>
 #include <tuple>
+
+static llvm::cl::opt<bool> ExploitBPCs(
+    "souper-exploit-blockpcs",
+    llvm::cl::desc("Exploit block path conditions (default=true)"),
+    llvm::cl::init(true));
 
 using namespace llvm;
 using namespace klee;
@@ -493,7 +499,7 @@ void ExprBuilder::addPathConditions(BlockPCs &BPCs,
         }
       }
     }
-  } else {
+  } else if (ExploitBPCs) {
     // BB is the entry of the function.
     if (pred_begin(BB) == pred_end(BB))
       return;
@@ -651,12 +657,12 @@ public:
      : FunctionPass(ID), Opts(Opts), IC(IC), EBC(EBC), Result(Result) {}
 
   void getAnalysisUsage(AnalysisUsage &Info) const {
-    Info.addRequired<LoopInfo>();
+    Info.addRequired<LoopInfoWrapperPass>();
     Info.setPreservesAll();
   }
 
   bool runOnFunction(Function &F) {
-    LoopInfo *LI = &getAnalysis<LoopInfo>();
+    LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     ExtractExprCandidates(F, LI, Opts, IC, EBC, Result);
     return false;
   }
