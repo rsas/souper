@@ -93,9 +93,8 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 /// The width of most of the instructions is unknown in advance, therefore, we
 /// indicate this by setting the Width to 0. During initialization, the width
 /// will be set to the DefaultWidth (maximum width of the input vars).
+/// Note that constants are treated as ordinary inputs
 static const std::vector<Component> CompLibrary = {
-  Component{Inst::Const, 0, {}},
-  //
   Component{Inst::Add, 0, {0,0}},
   Component{Inst::Sub, 0, {0,0}},
   Component{Inst::Mul, 0, {0,0}},
@@ -139,6 +138,8 @@ public:
 private:
   /// Components to be used
   std::vector<Component> Comps;
+  /// Constant components
+  std::vector<Component> ConstComps;
   /// User supplied components kinds
   std::set<Inst::Kind> UserCompKinds;
   /// Program inputs
@@ -178,6 +179,9 @@ private:
 
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
+
+  /// Initalize constant components
+  void initConstComponents(InstContext &IC);
 
   /// Set default component inst width
   void setDefaultWidth(Inst *LHS);
@@ -224,8 +228,8 @@ private:
   /// phi_R: Forall x in R: |N| <= l_x <= M-1
   Inst *getLocVarConstraint(InstContext &IC);
 
-  /// Min <= O <= Max
-  Inst *getCompNumConstraint(unsigned Min, unsigned Max, InstContext &IC);
+  /// Begin <= O < End
+  Inst *getOutputLocVarConstraint(int Begin, int End, InstContext &IC);
 
   /// Each component's input should be wired either to an input
   /// or to a component's output
