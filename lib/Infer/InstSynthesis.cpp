@@ -25,6 +25,9 @@ namespace {
 static cl::opt<bool> DebugSynthesis("souper-debug-synthesis",
     cl::desc("Debug instruction synthesis (default=false)"),
     cl::init(false));
+static cl::opt<int> CmdMaxCompNum("souper-synthesis-comp-num",
+    cl::desc("Maximum number of components (default=all)"),
+    cl::init(-1));
 static cl::opt<std::string> CmdUserCompKinds("souper-synthesis-comps",
     cl::Hidden,
     cl::desc("Comma-separated list of instruction synthesis component kinds"),
@@ -119,7 +122,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   }
 
   // Iterative synthesis loop with increasing number of components
-  unsigned MaxCompNum = IgnoreCost ? Comps.size() : LHSCost-1;
+  unsigned MaxCompNum;
+  if (CmdMaxCompNum >= 0)
+    MaxCompNum = CmdMaxCompNum;
+  else
+    MaxCompNum = IgnoreCost ? Comps.size() : LHSCost-1;
+  if (MaxCompNum > Comps.size())
+    MaxCompNum = Comps.size();
   for (unsigned J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
     // If synthesis using 0 components failed (aka nop synthesis),
@@ -263,15 +272,15 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 }
 
 void InstSynthesis::setCompLibrary() {
+  if (CmdMaxCompNum == 0)
+    return;
   if (CmdUserCompKinds.size()) {
     std::vector<Inst::Kind> Kinds;
     // Parse user-provided component kind strings
     for (auto KindStr : splitString(CmdUserCompKinds.c_str())) {
       Inst::Kind K = Inst::getKind(KindStr);
       UserCompKinds.insert(K);
-      if (KindStr == "nop")
-        break;
-      else if (KindStr == Inst::getKindName(Inst::Const)) { // Special case
+      if (KindStr == Inst::getKindName(Inst::Const)) { // Special case
         ConstComps.push_back(Component{Inst::Const, 0, {}});
       } else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
         continue; // handled in addZSTComps
