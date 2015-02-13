@@ -251,6 +251,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
             llvm::outs() << Name << " = " << Val << "\n";
         }
       }
+      // Sanity check: The counterexamples must be unique
+      for (auto const &E : S)
+        if (E == InputMap) {
+          llvm::errs() << "synthesis bug: counterexamples not unique\n";
+          assert(0);
+          break;
+        }
       // Add counterexamples to S
       S.push_back(InputMap);
     }
