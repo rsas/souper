@@ -276,7 +276,7 @@ private:
                           std::map<LocVar, llvm::APInt> &ConstValMap);
 
   /// Find a wiring input for given location variable Loc.
-  /// The result is either an input or a component output
+  /// The result is either an input, a constant, or a component output
   LocVar getWiringLocVar(const LocVar &Loc, const LineLocVarMap &ProgramWiring);
 
   /// Create a junk-free inst. E.g., return %0 if inst is of type and %0, %0
