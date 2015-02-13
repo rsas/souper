@@ -129,7 +129,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   if (CmdMaxCompNum >= 0)
     MaxCompNum = CmdMaxCompNum;
   else
-    MaxCompNum = IgnoreCost ? Comps.size() : LHSCost-1;
+    MaxCompNum = Comps.size();
+  if (!IgnoreCost && MaxCompNum >= LHSCost)
+    MaxCompNum = LHSCost-1;
   if (MaxCompNum > Comps.size())
     MaxCompNum = Comps.size();
   for (unsigned J = 0; J <= MaxCompNum; ++J) {
