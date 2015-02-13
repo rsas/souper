@@ -82,11 +82,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint(IC);
 
-  // A maping from a var's string to the actual instruction.
-  // This mapping is required during model parsing
-  std::map<std::string, Inst *> InputNameMap;
-  for (auto In : Inputs)
-      InputNameMap[In->Name] = In;
   // Initial concrete input set S.
   // With every new input set that proves a synthesised program is invalid,
   // we'll have to copy WiringQuery and replace its inputs with the new
@@ -112,7 +107,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       break;
 
     std::map<Inst *, Inst *> ConcreteInputs;
-    for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+    for (unsigned J = 0; J < ModelInsts.size(); ++J) {
       auto Name = ModelInsts[J]->Name;
       if (Name.find(INPUT_PREFIX) != std::string::npos) {
         auto Input = ModelInsts[J];
@@ -233,33 +228,56 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         return EC;
       }
 
-      Refinements++;
-      if (DebugSynthesis) {
-        llvm::outs() << "refinement: " << Refinements << "\n";
+      if (DebugSynthesis)
         llvm::outs() << "didn't work for all inputs, counterexample(s):\n";
-      }
-
       // Parse input counterexamples from the model
       std::map<Inst *, Inst *> InputMap;
-      for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+      for (unsigned J = 0; J < ModelInsts.size(); ++J) {
         auto Name = ModelInsts[J]->Name;
-        if (InputNameMap.count(Name)) {
-          auto In = InputNameMap[Name];
+        if (Name.find(INPUT_PREFIX) != std::string::npos) {
+          auto In = ModelInsts[J];
           auto Val = ModelVals[J];
           InputMap[In] = IC.getConst(Val);
           if (DebugSynthesis)
             llvm::outs() << Name << " = " << Val << "\n";
         }
       }
-      // Sanity check: The counterexamples must be unique
-      for (auto const &E : S)
-        if (E == InputMap) {
-          llvm::errs() << "synthesis bug: counterexamples not unique\n";
-          assert(0);
+      // The counterexamples should be unique in each iteration
+      bool CexExists;
+      for (auto const &E : S) {
+        CexExists = true;
+        for (auto const &P : E) {
+          if (InputMap[P.first] == P.second)
+            continue;
+          CexExists = false;
           break;
         }
+        if (CexExists)
+          break;
+      }
       // Add counterexamples to S
-      S.push_back(InputMap);
+      if (!CexExists)
+        S.push_back(InputMap);
+
+      Refinements++;
+      if (DebugSynthesis)
+        llvm::outs() << "refinement: " << Refinements << "\n";
+
+      // Input-free candidates (such as constants) are not constrained
+      // by the inputs, thus, we must forbid the not-working cand
+      // wirings explicitly in the future
+      if (!hasInputs(Cand)) {
+        if (DebugSynthesis)
+          llvm::outs() << "cand has no inputs, constraining wiring\n";
+        Inst *Ante = IC.getConst(APInt(1, true));
+        for (auto const &Pair : Wiring) {
+          auto const &L_x = Pair.first;
+          auto const &L_y = Pair.second;
+          Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
+          Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
+        }
+        LoopPCs.emplace_back(Ante, IC.getConst(APInt(1, true)));
+      }
     }
   }
 
@@ -297,13 +315,6 @@ void InstSynthesis::setCompLibrary() {
                  << " components, synthesis will probably take long time"
                  << " or run out of memory\n";
   }
-}
-
-void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
-  if (I->K == Inst::Var)
-    InputVars.push_back(I);
-  for (auto I : I->orderedOps())
-    getInputVars(I, InputVars);
 }
 
 void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
@@ -941,7 +952,7 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
   auto ModelInsts = Solution.first;
   auto ModelVals = Solution.second;
   assert(ModelVals.size() && "there must models to parse");
-  for (unsigned J = 0; J != ModelInsts.size(); ++J) {
+  for (unsigned J = 0; J < ModelInsts.size(); ++J) {
     auto Name = ModelInsts[J]->Name;
     // Parse location variable models
     if (Name.find(LOC_PREFIX) != std::string::npos) {
@@ -1002,10 +1013,8 @@ LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
       if (DebugSynthesis)
         llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
       for (auto const &In : E.second) {
-        // FIXME
-        //if ((In.first == 0 || In.second == 0) && !isWiringInvalid(In, OpLoc)) {
         // Take either input, constant, or component output of matching width
-        if (In.first == 0 || In.second == 0) {
+        if ((In.first == 0 || In.second == 0) && !isWiringInvalid(In, OpLoc)) {
           Match = In;
           if (DebugSynthesis)
             llvm::outs() << getLocVarStr(Match);
@@ -1151,6 +1160,13 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   return IC.getInst(Kind, Width, Ops);
 }
 
+void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
+  if (I->K == Inst::Var)
+    InputVars.push_back(I);
+  for (auto I : I->orderedOps())
+    getInputVars(I, InputVars);
+}
+
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
                                         const std::string Prefix) {
   std::string Post = "";
@@ -1239,6 +1255,15 @@ int InstSynthesis::costHelper(Inst *I, std::set<Inst *> &Visited) {
 int InstSynthesis::cost(Inst *I) {
   std::set<Inst *> Visited;
   return costHelper(I, Visited);
+}
+
+bool InstSynthesis::hasInputs(Inst *I) {
+  if (I->K == Inst::Var)
+    return true;
+  bool Res = false;
+  for (auto I : I->orderedOps())
+    Res |= hasInputs(I);
+  return Res;
 }
 
 }

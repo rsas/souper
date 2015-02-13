@@ -174,9 +174,6 @@ private:
   /// Initialize components to be used during synthesis
   void setCompLibrary();
 
-  /// Get input variables. Use a vector to ensure deterministic order
-  void getInputVars(Inst *I, std::vector<Inst *> &InputVars);
-
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
 
@@ -284,6 +281,7 @@ private:
                            std::vector<Inst *> &Ops, InstContext &IC);
 
   /// Helper functions
+  void getInputVars(Inst *I, std::vector<Inst *> &InputVars);
   std::string getLocVarStr(const LocVar &Loc, const std::string Prefix="");
   LocVar getLocVarFromStr(const std::string &Str);
   std::vector<LocVar> getOpLocs(const LocVar &Loc);
@@ -291,6 +289,7 @@ private:
   bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
+  bool hasInputs(Inst *I);
 
 };
 
