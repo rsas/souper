@@ -125,16 +125,17 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   }
 
   // Iterative synthesis loop with increasing number of components
-  unsigned MaxCompNum;
+  int MaxCompNum;
   if (CmdMaxCompNum >= 0)
     MaxCompNum = CmdMaxCompNum;
   else
     MaxCompNum = Comps.size();
   if (!IgnoreCost && MaxCompNum >= LHSCost)
     MaxCompNum = LHSCost-1;
-  if (MaxCompNum > Comps.size())
+  // MaxCompNum can be negative
+  if (MaxCompNum > (int)Comps.size())
     MaxCompNum = Comps.size();
-  for (unsigned J = 0; J <= MaxCompNum; ++J) {
+  for (int J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
     // If synthesis using 0 components failed (aka nop synthesis),
     // don't subsequently wire the output to the input(s)
