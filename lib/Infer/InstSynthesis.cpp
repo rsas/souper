@@ -87,22 +87,29 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   std::map<std::string, Inst *> InputNameMap;
   for (auto In : Inputs)
       InputNameMap[In->Name] = In;
-  std::vector<std::map<Inst *, Inst *>> InitialInputs;
+  // Initial concrete input set S.
+  // With every new input set that proves a synthesised program is invalid,
+  // we'll have to copy WiringQuery and replace its inputs with the new
+  // concrete values from S
+  std::vector<std::map<Inst *, Inst *>> S;
 
-  // Figure out valid initial inputs if PCs/BPCs are available
-  if (PCs.size() || BPCs.size()) {
-    // Ask the solver for an arbitrary solution that satisfies BPCs/PCs
+  // Ask the solver for a couple of arbitrary initial inputs
+  auto InputPCs = PCs;
+  for (unsigned I = 0; I < 4; ++I) {
     std::vector<Inst *> ModelInsts;
     std::vector<llvm::APInt> ModelVals;
     InstMapping Mapping(LHS, IC.createVar(LHS->Width, "foo"));
     // Negate the query to get a SAT model
-    std::string QueryStr = BuildQuery(BPCs, PCs, Mapping,
+    std::string QueryStr = BuildQuery(BPCs, InputPCs, Mapping,
                                       &ModelInsts, /*Negate=*/true);
     bool IsSat;
     EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
                                   &ModelVals, Timeout);
-    if (EC || !IsSat)
+    if (EC)
       return EC;
+
+    if (!IsSat)
+      break;
 
     std::map<Inst *, Inst *> ConcreteInputs;
     for (unsigned J = 0; J != ModelInsts.size(); ++J) {
@@ -110,15 +117,11 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (Name.find(INPUT_PREFIX) != std::string::npos) {
         auto Input = ModelInsts[J];
         ConcreteInputs[Input] = IC.getConst(ModelVals[J]);
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {Input, IC.getConst(ModelVals[J])});
+        InputPCs.emplace_back(Ne, IC.getConst(APInt(1, true)));
       }
     }
-    InitialInputs.push_back(ConcreteInputs);
-  } else {
-    // TODO: add more corner cases
-    std::map<Inst *, Inst *> ConcreteInputs;
-    for (auto In : Inputs)
-      ConcreteInputs[In] = IC.getConst(APInt::getNullValue(In->Width));
-    InitialInputs.push_back(ConcreteInputs);
+    S.push_back(ConcreteInputs);
   }
 
   // Iterative synthesis loop with increasing number of components
@@ -138,11 +141,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     else {
       CompConstraint = getOutputLocVarConstraint(N, N+J, IC);
     }
-    // Initial concrete input set S.
-    // With every new input set that proves a synthesised program is invalid,
-    // we'll have to copy WiringQuery and replace its inputs with the new
-    // concrete values from S
-    auto S = InitialInputs;
     // Init fresh loop PCs
     auto LoopPCs = WiringPCs;
     LoopPCs.emplace_back(CompConstraint, IC.getConst(APInt(1, true)));
@@ -153,11 +151,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     unsigned Refinements = 0;
     while (true) {
       Inst *Query = IC.getConst(APInt(1, true));
-      // Each set of concrete inputs is used in a separate copy of the
-      // main WiringQuery. For correct separation of these copies, we must
-      // copy all component input variables that encode data-flow
+      // Put each set of concrete inputs into a separate copy of the WiringQuery
       for (unsigned J = 0; J < S.size(); ++J) {
-        auto &InputMap = S[J];
+        auto InputMap = S[J];
         if (DebugSynthesis) {
           for (auto const &Input : InputMap) {
             if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
@@ -166,9 +162,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                          << " to " << Input.second->Val << "\n";
           }
         }
-        // Starting with the second concrete input set,
-        // copy component input variables for query separation
         if (J > 0) {
+          // Starting with the second concrete input set,
+          // copy component input variables for query separation
           for (auto const &E : LocInstMap) {
             if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
               auto In = E.second.second;
@@ -235,36 +231,25 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       }
 
       Refinements++;
-      if (DebugSynthesis)
+      if (DebugSynthesis) {
         llvm::outs() << "refinement: " << Refinements << "\n";
-
-      // Constants are not constrained by the inputs, thus, we must forbid the
-      // invalid locations explicitly. Similarly, if an input is wired to the output
-      // and is identified as invalid, we must skip it's location in the future too.
-      // However, some constants result from junk-removal, don't forbid these
-      if ((Cand->K == Inst::Const && LocInstMap.count(Cand->Name)) ||
-          Cand->K == Inst::Var) {
-        assert(LocInstMap.count(Cand->Name) && "unknown var candidate location");
-        Inst *Ne = IC.getInst(Inst::Ne, 1, {LocInstMap[Cand->Name].second, O.second});
-        LoopPCs.emplace_back(Ne, IC.getConst(APInt(1, true)));
+        llvm::outs() << "didn't work for all inputs, counterexample(s):\n";
       }
 
-      if (DebugSynthesis)
-        llvm::outs() << "didn't work for all inputs, counterexample(s):\n";
       // Parse input counterexamples from the model
-      std::map<Inst *, Inst *> Replacements;
+      std::map<Inst *, Inst *> InputMap;
       for (unsigned J = 0; J != ModelInsts.size(); ++J) {
         auto Name = ModelInsts[J]->Name;
         if (InputNameMap.count(Name)) {
           auto In = InputNameMap[Name];
           auto Val = ModelVals[J];
-          Replacements[In] = IC.getConst(Val);
+          InputMap[In] = IC.getConst(Val);
           if (DebugSynthesis)
             llvm::outs() << Name << " = " << Val << "\n";
         }
       }
-      // Add replacements to S
-      S.push_back(Replacements);
+      // Add counterexamples to S
+      S.push_back(InputMap);
     }
   }
 
@@ -916,21 +901,7 @@ Inst *InstSynthesis::createInstFromWiring(
     if (DebugSynthesis)
       llvm::outs() << "- creating constant inst " << getLocVarStr(OutLoc)
                    << " with value " << ConstValMap.at(OutLoc) << "\n";
-    Inst *Const = IC.getConst(ConstValMap.at(OutLoc));
-    // Find const comp's location
-    LocInst Loc;
-    for (const auto &L_x : I) {
-      if (L_x.first == OutLoc) {
-        Loc = L_x;
-        break;
-      }
-    }
-    assert(Loc.first.second != 0 && "unknown const comp's output location");
-    // Update const inst's name
-    std::string LocVarStr = getLocVarStr(OutLoc, CONST_PREFIX);
-    Const->Name = LocVarStr;
-    LocInstMap[LocVarStr] = Loc;
-    return Const;
+    return IC.getConst(ConstValMap.at(OutLoc));
   }
   // Is it an input?
   if (OutLoc.first == 0) {
