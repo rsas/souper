@@ -1002,8 +1002,10 @@ LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
       if (DebugSynthesis)
         llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
       for (auto const &In : E.second) {
+        // FIXME
+        //if ((In.first == 0 || In.second == 0) && !isWiringInvalid(In, OpLoc)) {
         // Take either input, constant, or component output of matching width
-        if ((In.first == 0 || In.second == 0) && !isWiringInvalid(In, OpLoc)) {
+        if (In.first == 0 || In.second == 0) {
           Match = In;
           if (DebugSynthesis)
             llvm::outs() << getLocVarStr(Match);
