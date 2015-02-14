@@ -38,13 +38,15 @@ namespace souper {
 
 /// A location variable identifies an input variable, the output variable, or
 /// input/output of a library component. The encoding has the following
-/// semantics: If the first integer is 0, it's an input var where the second
-/// integer describes the number of an input variable. If the second integer
-/// is 0, it's an output var and the first integer describes the number of a
+/// semantics: If the first integer is 0, it's an input var or a constant
+/// where the second integer describes its number. If the second integer is 0,
+/// it's an output var and the first integer describes the number of a
 /// component. The output variable is encoded by second integer being 0 and
 /// the first integer being equal to the number of library components plus one.
 /// Otherwise, it's a component input where the first integer describes the
 /// number of a component and the second integer describes it's input number.
+/// Note that constant components (no inputs, one output) are not treated as
+/// ordinary library components, but rather as inputs.
 /// For example:
 /// 0_1, 0_2, 0_3 describe the input variables 1, 2, and 3.
 /// 1_0, 2_0, 3_0 describe the outputs of components 1, 2, and 3.
@@ -93,7 +95,7 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 /// The width of most of the instructions is unknown in advance, therefore, we
 /// indicate this by setting the Width to 0. During initialization, the width
 /// will be set to the DefaultWidth (maximum width of the input vars).
-/// Note that constants are treated as ordinary inputs
+/// Again, note that constants are treated as ordinary inputs
 static const std::vector<Component> CompLibrary = {
   Component{Inst::Add, 0, {0,0}},
   Component{Inst::Sub, 0, {0,0}},
@@ -128,7 +130,7 @@ static const std::vector<Component> CompLibrary = {
 
 class InstSynthesis {
 public:
-  // Synthesize an instruction for the specification in LHS
+  // Synthesize an instruction from the specification in LHS
   std::error_code synthesize(SMTLIBSolver *SMTSolver,
                              const BlockPCs &BPCs,
                              const std::vector<InstMapping> &PCs,
@@ -177,9 +179,6 @@ private:
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
 
-  /// Initalize constant components
-  void initConstComponents(InstContext &IC);
-
   /// Set default component inst width
   void setDefaultWidth(Inst *LHS);
 
@@ -190,6 +189,9 @@ private:
   /// Initalize components' input locations, output locations,
   /// and components' concrete instruction instances
   void initComponents(InstContext &IC);
+
+  /// Initalize constant components
+  void initConstComponents(InstContext &IC);
 
   /// Initalize output location
   void initOutput(Inst *LHS, InstContext &IC);
@@ -202,7 +204,7 @@ private:
 
   /// Set particular wirings to be invalid (e.g. width mismatches).
   /// These invalid wirings are not encoded as constraints, they are
-  /// simply skipped during constraint creation process
+  /// simply skipped during connectivity constraint creation
   void setInvalidWirings();
 
   /// Add all synthesis constraints as path conditions
@@ -241,7 +243,7 @@ private:
   /// and the program
   Inst *getConnectivityConstraint(InstContext &IC);
 
-  /// Create a copy of instruction I replacing it's input vars with vars
+  /// Create a copy of instruction I replacing its input vars with vars
   /// in Replacements
   Inst *getInstCopy(Inst *I, InstContext &IC,
                     const std::map<Inst *, Inst *> &Replacements);

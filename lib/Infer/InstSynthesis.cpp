@@ -119,7 +119,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     S.push_back(ConcreteInputs);
   }
 
-  // Iterative synthesis loop with increasing number of components
+  // Set the maximum number of components
   int MaxCompNum;
   if (CmdMaxCompNum >= 0)
     MaxCompNum = CmdMaxCompNum;
@@ -127,9 +127,10 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     MaxCompNum = Comps.size();
   if (!IgnoreCost && MaxCompNum >= LHSCost)
     MaxCompNum = LHSCost-1;
-  // MaxCompNum can be negative
+  // MaxCompNum can be negative when e.g. LHSCost is 0
   if (MaxCompNum > (int)Comps.size())
     MaxCompNum = Comps.size();
+  // Iterative synthesis loop with increasing number of components
   for (int J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
     // If synthesis using 0 components failed (aka nop synthesis),
@@ -279,7 +280,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 }
 
 void InstSynthesis::setCompLibrary() {
-  if (CmdMaxCompNum == 0)
+  if (!CmdMaxCompNum)
     return;
   if (CmdUserCompKinds.size()) {
     std::vector<Inst::Kind> Kinds;
@@ -344,9 +345,9 @@ void InstSynthesis::initConstComponents(InstContext &IC) {
     std::string LocVarStr = getLocVarStr(In, LOC_PREFIX);
     Inst *Loc = IC.createVar(LocInstWidth, LocVarStr);
     LocInstMap[LocVarStr] = std::make_pair(In, Loc);
-    // Add input location to I
+    // Add constant component location to I
     I.emplace_back(In, Loc);
-    // Update input name
+    // Update name
     LocVarStr = getLocVarStr(In, CONST_PREFIX);
     LocInstMap[LocVarStr] = std::make_pair(In, Loc);
     // Update CompInstMap map with concrete Inst
