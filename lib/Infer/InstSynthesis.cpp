@@ -243,18 +243,12 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         }
       }
       // The counterexamples should be unique in each iteration
-      bool CexExists;
-      for (auto const &E : S) {
-        CexExists = true;
-        for (auto const &P : E) {
-          if (InputMap[P.first] == P.second)
-            continue;
-          CexExists = false;
+      bool CexExists = false;
+      for (auto const &E : S)
+        if (std::equal(E.begin(), E.end(), InputMap.begin())) {
+          CexExists = true;
           break;
         }
-        if (CexExists)
-          break;
-      }
       // Add counterexamples to S
       if (!CexExists)
         S.push_back(InputMap);
