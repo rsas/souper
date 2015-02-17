@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+
+# Copyright 2015 The Souper Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import fileinput
+from subprocess import Popen, PIPE, STDOUT
+
+query = ""
+bvs = []
+for line in fileinput.input():
+    if not line.strip():
+        continue
+    elif ";" in line.strip()[0]:
+        continue
+    elif "set-option" in line:
+        continue
+    elif "get-value" in line:
+        # e.g. (get-value (a1) )
+        l = line.split(" ")[1].strip("(").strip(")")
+        bvs.append(l)
+        continue
+    query += line
+
+p = None
+if len(bvs):
+  p = Popen(["stp", "--SMTLIB2", "-p"], stdout=PIPE, stdin=PIPE, stderr=STDOUT)    
+else:
+  p = Popen(["stp", "--SMTLIB2"], stdout=PIPE, stdin=PIPE, stderr=STDOUT)    
+stp_stdout = p.communicate(input=query)[0]
+result = stp_stdout.decode()
+
+models = []
+for line in result.split("\n"):
+  if not line.strip():
+      continue
+  elif "ASSERT" in line.strip():
+      # e.g. ASSERT( loc_6_2 = 0x00000002 );
+      l = line.split(" ")
+      bv = l[1]
+      if not bv in bvs:
+          continue
+      val = l[3]
+      if "0x" in val or "0b" in val:
+          val = "#" + val[1:]
+      res = "((" + bv + " " + val + "))"
+      models.append(res)
+  else:
+      # sat/unsat/unknown
+      print line,
+
+print
+for model in models:
+    print model
