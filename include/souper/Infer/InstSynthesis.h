@@ -52,7 +52,7 @@ namespace souper {
 /// 4_0 describes the final output (assuming there are only three components)
 typedef std::pair<unsigned, unsigned> LocVar;
 
-/// A mapping from a location variable to it's concrete value (Inst::Const).
+/// A mapping from a location variable to its concrete value (Inst::Const).
 /// The values of location variables decide the interconnections between the
 /// various components. To describe a program, we have to determine which
 /// component goes on which location (line-number), and from which location

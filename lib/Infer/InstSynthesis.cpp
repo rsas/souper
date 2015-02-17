@@ -88,12 +88,15 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // concrete values from S
   std::vector<std::map<Inst *, Inst *>> S;
 
-  // Ask the solver for a couple of arbitrary initial inputs
+  // Ask the solver for four initial concrete inputs.
+  // This number was derived experimentally giving a good overall speed-up
+  // for both small and big synthesis queries
+  unsigned InitialInputNum = 4;
   auto InputPCs = PCs;
-  for (unsigned I = 0; I < 4; ++I) {
+  for (; InitialInputNum > 0; InitialInputNum--) {
     std::vector<Inst *> ModelInsts;
     std::vector<llvm::APInt> ModelVals;
-    InstMapping Mapping(LHS, IC.createVar(LHS->Width, "foo"));
+    InstMapping Mapping(LHS, IC.createVar(LHS->Width, "input"));
     // Negate the query to get a SAT model
     std::string QueryStr = BuildQuery(BPCs, InputPCs, Mapping,
                                       &ModelInsts, /*Negate=*/true);
@@ -198,10 +201,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       std::vector<std::pair<LocInst, LocInst>> Wiring;
       Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
                                        Wiring, IC);
-      if (!Cand) {
-        llvm::errs() << "synthesis bug: creating inst from a model failed\n";
-        return EC;
-      }
+      if (!Cand)
+        report_fatal_error("synthesis bug: creating inst from a model failed");
 
       if (DebugSynthesis) {
         llvm::outs() << "candidate:\n";
@@ -293,9 +294,9 @@ void InstSynthesis::setCompLibrary() {
       } else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
         continue; // handled in addZSTComps
       else if (K == Inst::Kind(~0))
-        report_fatal_error("unknown instruction: " + KindStr + "\n");
+        report_fatal_error("unknown instruction: " + KindStr);
       else if (UnsupportedCompKinds.count(K))
-        report_fatal_error("unsupported instruction: " + KindStr + "\n");
+        report_fatal_error("unsupported instruction: " + KindStr);
       else
         Kinds.push_back(K);
     }
@@ -853,10 +854,9 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
     }
   }
 
-  if (!CompInstMap.count(OutLoc)) {
-    llvm::errs() << "synthesis bug: output not wired\n";
-    return 0;
-  }
+  if (!CompInstMap.count(OutLoc))
+    report_fatal_error("synthesis bug: output location " +
+                       getLocVarStr(OutLoc) + " not wired");
 
   auto OpLocs = getOpLocs(OutLoc);
   if (DebugSynthesis) {
@@ -887,11 +887,9 @@ Inst *InstSynthesis::createInstFromWiring(
   for (auto const &OpLoc : OpLocs) {
     LocVar Match = getWiringLocVar(OpLoc, ProgramWiring);
     assert(CompInstMap.count(Match) && "unknown matching location variable");
-    if (!CompInstMap.count(Match)) {
-      llvm::errs() << "synthesis bug: component input "
-                   << getLocVarStr(OpLoc) << " not wired\n";
-      return 0;
-    }
+    if (!CompInstMap.count(Match))
+      report_fatal_error("synthesis bug: component input " +
+                         getLocVarStr(OpLoc) + " not wired");
     // Store wiring locations
     auto Left = getLocVarStr(OpLoc, LOC_PREFIX);
     auto Right = getLocVarStr(Match, LOC_PREFIX);
