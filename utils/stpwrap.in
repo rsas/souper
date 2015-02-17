@@ -41,7 +41,7 @@ else:
 stp_stdout = p.communicate(input=query)[0]
 result = stp_stdout.decode()
 
-models = []
+models = {}
 for line in result.split("\n"):
   if not line.strip():
       continue
@@ -55,11 +55,11 @@ for line in result.split("\n"):
       if "0x" in val or "0b" in val:
           val = "#" + val[1:]
       res = "((" + bv + " " + val + "))"
-      models.append(res)
+      models[bv] = res
   else:
       # sat/unsat/unknown
       print line,
 
 print
-for model in models:
-    print model
+for bv in bvs:
+    print models[bv]
