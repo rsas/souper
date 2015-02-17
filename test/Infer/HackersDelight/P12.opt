@@ -3,8 +3,8 @@
 ; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-ignore-cost -souper-synthesis-comps=ule,and,xor,const %s > %t1
 ; RUN: FileCheck %s < %t1
 
-; CHECK:      %5:i32 = xor %0, %1
-; CHECK-NEXT: %6:i32 = and %0, %5
+; CHECK:      %5:i32 = and %0, %1
+; CHECK-NEXT: %6:i32 = xor %0, %5
 ; CHECK-NEXT: %7:i1 = ule %6, %1
 ; CHECK-NEXT: result %7
 

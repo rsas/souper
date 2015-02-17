@@ -1,7 +1,7 @@
 ; REQUIRES: solver
 
 ; RUN: llvm-as -o %t %s
-; RUN: %souper %solver -check %t
+; RUN: %souper %solver -souper-exploit-blockpcs=false -check %t
 
 define i32 @foo(i32 %x) {
 entry:
@@ -17,10 +17,7 @@ br label %phi
 
 phi:
 %r = phi i32 [10, %cond2], [%t10, %cond1]
-%cmp = icmp eq i32 %r, 10, !expected !1
+%cmp = icmp eq i32 %r, 10
 %conv = zext i1 %cmp to i32
 ret i32 %conv
 }
-
-!1 = !{i1 1}
-

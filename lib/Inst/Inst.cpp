@@ -531,6 +531,10 @@ bool Inst::isCommutative(Inst::Kind K) {
 
 int Inst::getCost(Inst::Kind K) {
   switch (K) {
+    case Var:
+    case Const:
+    case Phi:
+      return 0;
     case BSwap:
     case CtPop:
     case Cttz:
