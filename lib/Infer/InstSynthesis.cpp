@@ -96,7 +96,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   for (; InitialInputNum > 0; InitialInputNum--) {
     std::vector<Inst *> ModelInsts;
     std::vector<llvm::APInt> ModelVals;
-    InstMapping Mapping(LHS, IC.createVar(LHS->Width, "input"));
+    InstMapping Mapping(LHS, IC.createVar(LHS->Width, "output"));
     // Negate the query to get a SAT model
     std::string QueryStr = BuildQuery(BPCs, InputPCs, Mapping,
                                       &ModelInsts, /*Negate=*/true);
