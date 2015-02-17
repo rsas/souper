@@ -838,6 +838,8 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
   std::map<LocVar, llvm::APInt> ConstValMap;
 
   LocVar OutLoc = parseWiringModel(Solution, ProgramWiring, ConstValMap);
+  if (!CompInstMap.count(OutLoc))
+    report_fatal_error("synthesis bug: output location not wired");
   auto Left = getLocVarStr(O.first, LOC_PREFIX);
   auto Right = getLocVarStr(OutLoc, LOC_PREFIX);
   Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
@@ -853,10 +855,6 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << "\n";
     }
   }
-
-  if (!CompInstMap.count(OutLoc))
-    report_fatal_error("synthesis bug: output location " +
-                       getLocVarStr(OutLoc) + " not wired");
 
   auto OpLocs = getOpLocs(OutLoc);
   if (DebugSynthesis) {
