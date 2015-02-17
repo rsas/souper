@@ -192,6 +192,7 @@ add_library(souperPass SHARED
   ${SOUPER_PARSER_FILES}
   ${SOUPER_SMTLIB2_FILES}
   ${SOUPER_TOOL_FILES}
+  ${SOUPER_INFER_FILES}
   lib/Pass/Pass.cpp
 )
 

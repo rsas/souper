@@ -1156,8 +1156,8 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
 void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
   if (I->K == Inst::Var)
     InputVars.push_back(I);
-  for (auto I : I->orderedOps())
-    getInputVars(I, InputVars);
+  for (auto Iz : I->orderedOps())
+    getInputVars(Iz, InputVars);
 }
 
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
@@ -1254,8 +1254,8 @@ bool InstSynthesis::hasInputs(Inst *I) {
   if (I->K == Inst::Var)
     return true;
   bool Res = false;
-  for (auto I : I->orderedOps())
-    Res |= hasInputs(I);
+  for (auto Iz : I->orderedOps())
+    Res |= hasInputs(Iz);
   return Res;
 }
 
