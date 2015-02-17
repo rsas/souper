@@ -1,4 +1,4 @@
-// Copyright 2014 The Souper Authors. All rights reserved.
+// Copyright 2015 The Souper Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,16 +23,13 @@
 #include <vector>
 #include <utility>
 
-/*
-  This class is based on the "Synthesis of Loop-free Programs" approach
-  by Gulwani et al. presented at PLDI'11.
-  Paper:  http://dl.acm.org/citation.cfm?id=1993506
-  Slides: http://www.eecs.berkeley.edu/~jha/pres/pldi11.pdf
-
-  The implementation is derived from the description in the paper, but it
-  also contains additional steps that were necessary to apply this synthesis
-  method in Souper.
-*/
+/// This class is based on the "Synthesis of Loop-free Programs" approach
+/// by Gulwani et al. presented at PLDI'11.
+/// Paper:  http://dl.acm.org/citation.cfm?id=1993506
+/// Slides: http://www.eecs.berkeley.edu/~jha/pres/pldi11.pdf
+/// The implementation is derived from the description in the paper, but it
+/// also contains additional steps that were necessary to apply this synthesis
+/// method in Souper.
 
 namespace souper {
 
