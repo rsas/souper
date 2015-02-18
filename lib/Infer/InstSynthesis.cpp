@@ -94,6 +94,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // concrete values from S
   std::vector<std::map<Inst *, Inst *>> S;
 
+  // Not-working candidate programs that contain constants must be forbidden
+  // explicitly because constants are not constrainted by the inputs. Still, it
+  // can take many iterations to converge. Therefore, we limit the number
+  // of attempts per such a candidate wiring using MaxWiringAttempts set to 10
+  // (number seen in papers)
+  std::map<ProgramWiring, unsigned> NotWorkingConstWirings;
+  const unsigned MaxWiringAttempts = 10;
+
   // Ask the solver for four initial concrete inputs.
   // This number was derived experimentally giving a good overall speed-up
   // for both small and big synthesis queries
@@ -139,6 +147,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // MaxCompNum can be negative when e.g. LHSCost is 0
   if (MaxCompNum > (int)Comps.size())
     MaxCompNum = Comps.size();
+
+  if (DebugSynthesis && DebugLevel > 0) {
+    llvm::outs() << "starting synthesis for LHS:\n";
+    ReplacementContext Context;
+    PrintReplacementRHS(llvm::outs(), LHS, Context);
+  }
+
   // Iterative synthesis loop with increasing number of components
   for (int J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
@@ -209,16 +224,20 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         if (DebugSynthesis && DebugLevel > 0)
           llvm::outs() << "UNSAT\n";
         break;
+      } else {
+        if (DebugSynthesis && DebugLevel > 0)
+          llvm::outs() << "SAT\n";
       }
 
-      std::vector<std::pair<LocInst, LocInst>> Wiring;
+      ProgramWiring CandWiring;
+      std::map<LocVar, llvm::APInt> ConstValMap;
       Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
-                                       Wiring, IC);
+                                       CandWiring, ConstValMap, IC);
       if (!Cand)
         report_fatal_error("synthesis bug: creating inst from a model failed");
 
       if (DebugSynthesis && DebugLevel > 0) {
-        llvm::outs() << "SAT, candidate:\n";
+        llvm::outs() << "candidate:\n";
         ReplacementContext Context;
         PrintReplacementRHS(llvm::outs(), Cand, Context);
       }
@@ -257,10 +276,10 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
           auto Val = ModelVals[J];
           InputMap[In] = IC.getConst(Val);
           if (DebugSynthesis && DebugLevel > 1)
-            llvm::outs() << "Counterexample: " << Name << " = " << Val << "\n";
+            llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
         }
       }
-      // The counterexamples should be unique in each iteration
+      // Counterexamples should be unique in each iteration
       bool CexExists = false;
       for (auto const &E : S)
         if (std::equal(E.begin(), E.end(), InputMap.begin())) {
@@ -271,21 +290,53 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (!CexExists)
         S.push_back(InputMap);
 
-      // Input-free candidates (such as constants) are not constrained
-      // by the inputs, thus, we must forbid the not-working cand
-      // wirings explicitly in the future
-      if (!hasInputs(Cand)) {
-        if (DebugSynthesis && DebugLevel > 1)
-          llvm::outs() << "cand has no inputs, constraining wiring\n";
-        Inst *Ante = IC.getConst(APInt(1, true));
-        for (auto const &Pair : Wiring) {
-          auto const &L_x = Pair.first;
-          auto const &L_y = Pair.second;
-          Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
-          Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
-        }
-        LoopPCs.emplace_back(Ante, IC.getConst(APInt(1, true)));
+      if (!hasConst(Cand))
+        continue;
+
+      // Constants are not constrained by the inputs, thus, we must explicitly
+      // constrain the not-working cand wiring incl. the constants and forbid
+      // the wiring completely after MaxWiringAttempts is reached
+      auto WI = NotWorkingConstWirings.find(CandWiring);
+      if (WI == NotWorkingConstWirings.end()) {
+        NotWorkingConstWirings[CandWiring] = 0;
+        continue;
       }
+      WI->second++;
+      if (DebugSynthesis && DebugLevel > 1) {
+        llvm::outs() << "cand with constants, constraining wiring\n";
+        if (WI->second == MaxWiringAttempts)
+          llvm::outs() << "cand reached MaxWiringAttempts "
+                       << "(" << MaxWiringAttempts << "), forbidding\n";
+      }
+      Inst *Ante = IC.getConst(APInt(1, true));
+      for (auto const &Pair : CandWiring) {
+        auto const &L_x = Pair.first;
+        auto const &L_y = Pair.second;
+        if (DebugSynthesis && DebugLevel > 2)
+          llvm::outs() << getLocVarStr(L_x.first) << " == "
+                       << getLocVarStr(L_y.first) << "\n";
+        // Constrain the wiring
+        Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
+        Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
+        // If the cand is a constant, forbid the wiring immediately
+        if (Cand->K == Inst::Const)
+          continue;
+        // Otherwise, constrain the wiring with constants as long as
+        // MaxWiringAttempts is not reached. Afterwards, the wiring
+        // will be banned (without constants)
+        if (WI->second < MaxWiringAttempts) {
+          auto CI = ConstValMap.find(L_y.first);
+          if (CI == ConstValMap.end())
+            continue;
+          auto const &Cons = CompInstMap[L_y.first];
+          if (DebugSynthesis && DebugLevel > 1)
+            llvm::outs() << "with constant " << getLocVarStr(L_y.first)
+                         << " == " << CI->second << "\n";
+          Eq = IC.getInst(Inst::Eq, 1, {Cons, IC.getConst(CI->second)});
+          Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
+        }
+      }
+      LoopPCs.emplace_back(Ante, IC.getConst(APInt(1, false)));
     }
   }
 
@@ -844,23 +895,22 @@ Inst *InstSynthesis::getInstCopy(Inst *I, InstContext &IC,
 }
 
 Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
-                                         std::vector<std::pair<LocInst, LocInst>> &Wiring,
+                                         ProgramWiring &CandWiring,
+                                         std::map<LocVar, llvm::APInt> &ConstValMap,
                                          InstContext &IC) {
-  LineLocVarMap ProgramWiring;
-  std::map<LocVar, llvm::APInt> ConstValMap;
-
-  LocVar OutLoc = parseWiringModel(Solution, ProgramWiring, ConstValMap);
+  LineLocVarMap LineWiring;
+  LocVar OutLoc = parseWiringModel(Solution, LineWiring, ConstValMap);
   if (!CompInstMap.count(OutLoc))
     report_fatal_error("synthesis bug: output location not wired");
   auto Left = getLocVarStr(O.first, LOC_PREFIX);
   auto Right = getLocVarStr(OutLoc, LOC_PREFIX);
-  Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
+  CandWiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
 
   if (DebugSynthesis && DebugLevel > 2) {
     llvm::outs() << "found valid wiring, output "
                  << getLocVarStr(OutLoc) << ".\n";
     llvm::outs() << "line\tlocations\n";
-    for (auto const &E : ProgramWiring) {
+    for (auto const &E : LineWiring) {
       llvm::outs() << E.first << "\t";
       for (auto const &Loc : E.second)
         llvm::outs() << getLocVarStr(Loc) << " ";
@@ -877,8 +927,8 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << getLocVarStr(OpLoc) << " ";
     llvm::outs() << "}\n";
   }
-  Inst *Res = createInstFromWiring(OutLoc, OpLocs, ProgramWiring,
-                                   ConstValMap, Wiring, IC);
+  Inst *Res = createInstFromWiring(OutLoc, OpLocs, LineWiring,
+                                   ConstValMap, CandWiring, IC);
   assert(Res && "creating instruction from wiring failed");
 
   return Res;
@@ -887,15 +937,15 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
 Inst *InstSynthesis::createInstFromWiring(
       const LocVar &OutLoc,
       const std::vector<LocVar> &OpLocs,
-      const LineLocVarMap &ProgramWiring,
+      const LineLocVarMap &LineWiring,
       const std::map<LocVar, llvm::APInt> &ConstValMap,
-      std::vector<std::pair<LocInst, LocInst>> &Wiring,
+      ProgramWiring &CandWiring,
       InstContext &IC) {
   std::vector<Inst *> Ops;
 
   // Create operand instructions recursively
   for (auto const &OpLoc : OpLocs) {
-    LocVar Match = getWiringLocVar(OpLoc, ProgramWiring);
+    LocVar Match = getWiringLocVar(OpLoc, LineWiring);
     assert(CompInstMap.count(Match) && "unknown matching location variable");
     if (!CompInstMap.count(Match))
       report_fatal_error("synthesis bug: component input " +
@@ -903,7 +953,7 @@ Inst *InstSynthesis::createInstFromWiring(
     // Store wiring locations
     auto Left = getLocVarStr(OpLoc, LOC_PREFIX);
     auto Right = getLocVarStr(Match, LOC_PREFIX);
-    Wiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
+    CandWiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
     // Get operand locations of the wiring location
     auto Res = getOpLocs(Match);
     if (DebugSynthesis && DebugLevel > 2) {
@@ -914,8 +964,8 @@ Inst *InstSynthesis::createInstFromWiring(
       llvm::outs() << "}\n";
     }
     // Recurse
-    Inst *Op = createInstFromWiring(Match, Res, ProgramWiring,
-                                    ConstValMap, Wiring, IC);
+    Inst *Op = createInstFromWiring(Match, Res, LineWiring,
+                                    ConstValMap, CandWiring, IC);
     // Store result
     Ops.push_back(Op);
   }
@@ -937,15 +987,20 @@ Inst *InstSynthesis::createInstFromWiring(
   Component Comp = Comps[OutLoc.first-1];
   assert(OutLoc.first >= 1 && "invalid component location variable");
   assert((Ops.size() == Comp.OpWidths.size()) && "op num mismatch");
-  if (DebugSynthesis && DebugLevel > 2)
+  if (DebugSynthesis && DebugLevel > 2) {
     llvm::outs() << "- creating inst " << Inst::getKindName(Comp.Kind)
                  << ", width " << Comp.Width << "\n";
+    llvm::outs() << "before junk removal:\n";
+    ReplacementContext Context;
+    PrintReplacementRHS(llvm::outs(), IC.getInst(Comp.Kind, Comp.Width, Ops),
+                        Context);
+  }
 
   return createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
 }
 
 LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
-                                       LineLocVarMap &ProgramWiring,
+                                       LineLocVarMap &LineWiring,
                                        std::map<LocVar, llvm::APInt> &ConstValMap) {
   unsigned Counter = 0;
   LocVar OutLocVar;
@@ -961,7 +1016,7 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
     if (Name.find(LOC_PREFIX) != std::string::npos) {
       LocVar Loc = getLocVarFromStr(Name.substr(LOC_PREFIX.size()));
       unsigned Line = (unsigned)ModelVals[J].getZExtValue();
-      if (ProgramWiring.count(Line)) {
+      if (LineWiring.count(Line)) {
         // Look for the output wiring. It can be a component's output or any
         // of the inputs. Note that due to scalability reasons, we haven't
         // encoded width mismatches and other invalid wirings as constraints,
@@ -969,7 +1024,7 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
         if (!OutLocSet) {
           // Is it output? If yes, there should be only one component output
           // and/or any input on that line
-          auto const &VarMap = ProgramWiring[Line];
+          auto const &VarMap = LineWiring[Line];
           if (Loc == O.first) {
             for (auto const &CandLocVar : VarMap) {
               if (!isWiringInvalid(O.first, CandLocVar)) {
@@ -985,9 +1040,9 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
             OutLocSet = true;
           }
         }
-        ProgramWiring[Line].insert(Loc);
+        LineWiring[Line].insert(Loc);
       } else {
-        ProgramWiring[Line] = {Loc};
+        LineWiring[Line] = {Loc};
       }
       Counter++;
     // Parse constant models
@@ -997,21 +1052,21 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
     }
   }
   assert(OutLocSet && "no matching location for the output");
-  assert(ProgramWiring.size() <= M && "the output location must be <= M");
+  assert(LineWiring.size() <= M && "the output location must be <= M");
   assert(Counter == L.size() && "invalid number of locations in the model");
 
   return OutLocVar;
 }
 
 LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
-                                      const LineLocVarMap &ProgramWiring) {
+                                      const LineLocVarMap &LineWiring) {
   LocVar Match;
   bool FoundMatch = false;
 
   if (DebugSynthesis && DebugLevel > 2)
     llvm::outs() << "- looking for OpLoc wiring "
                  << getLocVarStr(OpLoc) << "\n";
-  for (auto const &E : ProgramWiring) {
+  for (auto const &E : LineWiring) {
     if (E.second.count(OpLoc)) {
       if (DebugSynthesis && DebugLevel > 2)
         llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
@@ -1260,12 +1315,12 @@ int InstSynthesis::cost(Inst *I) {
   return costHelper(I, Visited);
 }
 
-bool InstSynthesis::hasInputs(Inst *I) {
-  if (I->K == Inst::Var)
+bool InstSynthesis::hasConst(Inst *I) {
+  if (I->K == Inst::Const)
     return true;
   bool Res = false;
   for (auto Iz : I->orderedOps())
-    Res |= hasInputs(Iz);
+    Res |= hasConst(Iz);
   return Res;
 }
 
