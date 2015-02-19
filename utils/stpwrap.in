@@ -18,6 +18,7 @@ import fileinput
 from subprocess import Popen, PIPE, STDOUT
 
 query = ""
+decl = {}
 bvs = []
 for line in fileinput.input():
     if not line.strip():
@@ -26,10 +27,16 @@ for line in fileinput.input():
         continue
     elif "set-option" in line:
         continue
+    elif "declare-fun" in line:
+        bv = line.split()[1]
+        width = line.split(")")[1].split()[2]
+        decl[bv] = width
+        pass
     elif "get-value" in line:
         # e.g. (get-value (a1) )
-        l = line.split(" ")[1].strip("(").strip(")")
-        bvs.append(l)
+        bv = line[line.rfind("(")+1:line.find(")")].strip()
+        assert bv in decl
+        bvs.append(bv)
         continue
     query += line
 
@@ -58,8 +65,10 @@ for line in result.split("\n"):
       models[bv] = res
   else:
       # sat/unsat/unknown
-      print line,
+      print line
 
-print
 for bv in bvs:
-    print models[bv]
+    if not bv in models:
+        print "(("  + bv + " #b" + '0'*int(decl[bv]) + "))"
+    else:
+        print models[bv]
