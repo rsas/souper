@@ -249,31 +249,34 @@ private:
   /// location variables
   typedef std::map<unsigned, std::set<LocVar>> LineLocVarMap;
 
+  typedef std::vector<std::pair<LocInst, LocInst>> ProgramWiring;
+
   typedef std::pair<const std::vector<Inst *>&,
                     const std::vector<llvm::APInt>&> SolverSolution;
 
   /// Create a program from a solver model
   Inst *createInstFromModel(const SolverSolution &Solution,
-                            std::vector<std::pair<LocInst, LocInst>> &Wiring,
+                            ProgramWiring &CandWiring,
+                            std::map<LocVar, llvm::APInt> &ConstValMap,
                             InstContext &IC);
 
   /// Recursive instruction creation from a given program wiring
   Inst *createInstFromWiring(const LocVar &OutLoc,
                              const std::vector<LocVar> &OpLocs,
-                             const LineLocVarMap &ProgramWiring,
+                             const LineLocVarMap &LineWiring,
                              const std::map<LocVar, llvm::APInt> &ConstValMap,
-                             std::vector<std::pair<LocInst, LocInst>> &Wiring,
+                             ProgramWiring &CandWiring,
                              InstContext &IC);
 
   /// Parse wiring models extracting concrete values for location variables
   /// and constants. Return location variable that matches the output
   LocVar parseWiringModel(const SolverSolution &Solution,
-                          LineLocVarMap &ProgramWiring,
+                          LineLocVarMap &LineWiring,
                           std::map<LocVar, llvm::APInt> &ConstValMap);
 
   /// Find a wiring input for given location variable Loc.
   /// The result is either an input, a constant, or a component output
-  LocVar getWiringLocVar(const LocVar &Loc, const LineLocVarMap &ProgramWiring);
+  LocVar getWiringLocVar(const LocVar &Loc, const LineLocVarMap &LineWiring);
 
   /// Create a junk-free inst. E.g., return %0 if inst is of type and %0, %0
   Inst *createJunkFreeInst(Inst::Kind Kind, unsigned Width,
@@ -288,7 +291,7 @@ private:
   bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
-  bool hasInputs(Inst *I);
+  bool hasConst(Inst *I);
 
 };
 

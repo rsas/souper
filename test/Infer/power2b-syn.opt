@@ -1,4 +1,4 @@
-; REQUIRES: solver, solver-model, synthesis
+; REQUIRES: solver, solver-model
 
 ; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-ignore-cost -souper-synthesis-comps=eq,const,ctpop %s > %t1
 ; RUN: FileCheck %s < %t1
