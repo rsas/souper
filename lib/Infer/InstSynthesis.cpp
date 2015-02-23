@@ -77,8 +77,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
   int LHSCost = cost(LHS);
 
-  if (DebugSynthesis && DebugLevel > 1)
-    printInitInfo();
+  if (DebugSynthesis && DebugLevel > 0) {
+    llvm::outs() << "---------------------------\n";
+    llvm::outs() << "starting synthesis for LHS:\n";
+    ReplacementContext Context;
+    PrintReplacementRHS(llvm::outs(), LHS, Context);
+    if (DebugLevel > 1)
+      printInitInfo();
+  }
 
   setInvalidWirings();
 
@@ -148,12 +154,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // MaxCompNum can be negative when e.g. LHSCost is 0
   if (MaxCompNum > (int)Comps.size())
     MaxCompNum = Comps.size();
-
-  if (DebugSynthesis && DebugLevel > 0) {
-    llvm::outs() << "starting synthesis for LHS:\n";
-    ReplacementContext Context;
-    PrintReplacementRHS(llvm::outs(), LHS, Context);
-  }
 
   // Iterative synthesis loop with increasing number of components
   for (int J = 0; J <= MaxCompNum; ++J) {
@@ -431,23 +431,31 @@ void InstSynthesis::setDefaultWidth(Inst *LHS) {
 void InstSynthesis::filterFixedWidthIntrinsicComps() {
   // CtPop/BSwap/Cttz/Ctlz require specific widths
   for (auto It = Comps.begin(); It != Comps.end();) {
-    if (It->Kind == Inst::BSwap) {
-      if (DefaultWidth != 16 && DefaultWidth != 32 && DefaultWidth != 64)
-        It = Comps.erase(It);
-    } else if ((It->Kind == Inst::CtPop) || (It->Kind == Inst::Ctlz)
-             || (It->Kind == Inst::Cttz)) {
-      if (DefaultWidth != 8 && DefaultWidth != 16 && DefaultWidth != 32 &&
-          DefaultWidth != 64 && DefaultWidth != 256)
-        It = Comps.erase(It);
-    } else {
+    if (It->Kind == Inst::BSwap && DefaultWidth != 16 && DefaultWidth != 32 &&
+        DefaultWidth != 64)
+      It = Comps.erase(It);
+    else if (((It->Kind == Inst::CtPop) || (It->Kind == Inst::Ctlz) ||
+               (It->Kind == Inst::Cttz)) && DefaultWidth != 8 &&
+               DefaultWidth != 16 && DefaultWidth != 32 &&
+               DefaultWidth != 64 && DefaultWidth != 256)
+      It = Comps.erase(It);
+    else
       ++It;
-    }
   }
 }
 
 void InstSynthesis::addZSTComps(Inst *LHS) {
   bool TestMode = CmdUserCompKinds.size() ? true : false;
+  bool HasI1Comps = false;
+  const std::set<Inst::Kind> I1Comps = { Inst::Eq, Inst::Ne, Inst::Ult,
+                                         Inst::Slt, Inst::Ule, Inst::Sle };
 
+  // Check if i1 comps are available in the selected library
+  for (auto const &Comp : Comps)
+    if (I1Comps.count(Comp.Kind)) {
+      HasI1Comps = true;
+      break;
+    }
   // Extend all inputs to DefaultWidth
   for (auto In : Inputs) {
     if (In->Width < DefaultWidth) {
@@ -463,7 +471,7 @@ void InstSynthesis::addZSTComps(Inst *LHS) {
     }
   }
   // It's common to extend from i1 (e.g. icmp output) to bigger iN
-  if (DefaultWidth > 1) {
+  if (DefaultWidth > 1 && HasI1Comps) {
     if (TestMode) {
       if (UserCompKinds.count(Inst::ZExt)) {
         Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
@@ -849,9 +857,9 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
     }
     if (DebugSynthesis && DebugLevel > 1)
       llvm::outs() << "false\n";
-    // Add to result
-    if (Ante != IC.getConst(APInt(1, false)))
-      Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
+    if (Ante == IC.getConst(APInt(1, false)))
+      report_fatal_error("no input-definedness for " + getLocVarStr(L_x.first));
+    Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
   }
 
   return Ret;
@@ -1246,20 +1254,16 @@ std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
   // Print component's name in debug mode
   if (DebugSynthesis && Prefix == "") {
     std::string Str;
-    unsigned Width;
+    auto Width = CompInstMap[Loc]->Width;
     if (Loc == O.first) {
       Str = "output";
-      Width = CompInstMap[Loc]->Width;
     } else if (Loc.first == 0 && Loc.second > Inputs.size()) {
       Str = "const";
-      Width = CompInstMap[Loc]->Width;
     } else if (Loc.first == 0) {
       Str = "input";
-      Width = CompInstMap[Loc]->Width;
     } else {
       auto const &Comp = Comps[Loc.first-1];
       Str = std::string(Inst::getKindName(Comp.Kind));
-      Width = Comp.Width;
     }
     Post = " (" + Str + ",i" + std::to_string(Width) + ")";
   }
