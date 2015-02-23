@@ -42,6 +42,10 @@ static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost",
     cl::Hidden,
     cl::desc("Ignore cand inst cost (default=false)"),
     cl::init(false));
+static cl::opt<unsigned> MaxWiringAttempts("souper-synthesis-wiring-iterations",
+    cl::Hidden,
+    cl::desc("Number of convergence iterations of wirings that contain constants"),
+    cl::init(10));
 
 }
 
@@ -104,10 +108,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Not-working candidate programs that contain constants must be forbidden
   // explicitly because constants are not constrainted by the inputs. Still, it
   // can take many iterations to converge. Therefore, we limit the number
-  // of attempts per such a candidate wiring using MaxWiringAttempts set to 10
-  // (number seen in papers)
+  // of attempts per such a candidate wiring via cmd flag MaxWiringAttempts
+  // (default value: 10)
   std::map<ProgramWiring, unsigned> NotWorkingConstWirings;
-  const unsigned MaxWiringAttempts = 10;
 
   // Ask the solver for four initial concrete inputs.
   // This number was derived experimentally giving a good overall speed-up
