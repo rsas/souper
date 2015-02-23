@@ -283,6 +283,7 @@ private:
                            std::vector<Inst *> &Ops, InstContext &IC);
 
   /// Helper functions
+  void filterFixedWidthIntrinsicComps();
   void getInputVars(Inst *I, std::vector<Inst *> &InputVars);
   std::string getLocVarStr(const LocVar &Loc, const std::string Prefix="");
   LocVar getLocVarFromStr(const std::string &Str);

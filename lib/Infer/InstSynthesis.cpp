@@ -65,6 +65,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   setCompLibrary();
   initInputVars(LHS, IC);
   setDefaultWidth(LHS);
+  filterFixedWidthIntrinsicComps();
   addZSTComps(LHS);
   initOutput(LHS, IC);
   initComponents(IC);
@@ -370,9 +371,6 @@ void InstSynthesis::setCompLibrary() {
   } else {
     Comps = CompLibrary;
     ConstComps.push_back(Component{Inst::Const, 0, {}});
-    llvm::outs() << "WARNING: using all " << Comps.size()
-                 << " components, synthesis will probably take long time"
-                 << " or run out of memory\n";
   }
 }
 
@@ -428,6 +426,23 @@ void InstSynthesis::setDefaultWidth(Inst *LHS) {
   // No inputs, use output width
   if (!DefaultWidth)
     DefaultWidth = LHS->Width;
+}
+
+void InstSynthesis::filterFixedWidthIntrinsicComps() {
+  // CtPop/BSwap/Cttz/Ctlz require specific widths
+  for (auto It = Comps.begin(); It != Comps.end();) {
+    if (It->Kind == Inst::BSwap) {
+      if (DefaultWidth != 16 && DefaultWidth != 32 && DefaultWidth != 64)
+        It = Comps.erase(It);
+    } else if ((It->Kind == Inst::CtPop) || (It->Kind == Inst::Ctlz)
+             || (It->Kind == Inst::Cttz)) {
+      if (DefaultWidth != 8 && DefaultWidth != 16 && DefaultWidth != 32 &&
+          DefaultWidth != 64 && DefaultWidth != 256)
+        It = Comps.erase(It);
+    } else {
+      ++It;
+    }
+  }
 }
 
 void InstSynthesis::addZSTComps(Inst *LHS) {
