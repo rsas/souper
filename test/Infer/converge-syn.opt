@@ -1,9 +1,9 @@
 ; REQUIRES: solver, solver-model
 
-; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-comps=const,eq -souper-exploit-ub=false -souper-synthesis-debug -souper-synthesis-debug-level=2 %s > %t1
+; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-comps=const,eq -souper-exploit-ub=false -souper-synthesis-wiring-iterations=10 -souper-synthesis-debug %s > %t1
 ; RUN: FileCheck %s < %t1
 
-; CHECK: cand reached MaxWiringAttempts
+; CHECK: MaxWiringAttempts
 ; CHECK: Failed to infer RHS
 
 %0 = block 2
