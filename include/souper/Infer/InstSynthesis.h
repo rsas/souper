@@ -293,6 +293,7 @@ private:
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
   bool hasConst(Inst *I);
+  bool hasOtherWidthComps(Inst *I);
 
 };
 
