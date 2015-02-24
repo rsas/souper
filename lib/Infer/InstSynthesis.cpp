@@ -1138,57 +1138,51 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::Add:
   case Inst::AddNSW:
   case Inst::AddNUW:
-  case Inst::AddNW: {
+  case Inst::AddNW:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return Ops[1];
     else if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
   case Inst::Sub:
   case Inst::SubNSW:
   case Inst::SubNUW:
-  case Inst::SubNW: {
+  case Inst::SubNW:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(Width, 0));
     else if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
   case Inst::Mul:
   case Inst::MulNSW:
   case Inst::MulNUW:
-  case Inst::MulNW: {
+  case Inst::MulNW:
     if (Ops[0] == IC.getConst(APInt(Width, 1)))
       return Ops[1];
     else if (Ops[1] == IC.getConst(APInt(Width, 1)))
       return Ops[0];
     break;
-  }
 
   case Inst::UDiv:
   case Inst::SDiv:
   case Inst::UDivExact:
-  case Inst::SDivExact: {
+  case Inst::SDivExact:
     if (Ops[1] == IC.getConst(APInt(Width, 1)))
       return Ops[0];
     break;
-  }
 
   case Inst::And:
-  case Inst::Or: {
+  case Inst::Or:
     if (Ops[0] == Ops[1])
       return Ops[0];
     break;
-  }
 
-  case Inst::Xor: {
+  case Inst::Xor:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(Width, 0));
     break;
-  }
 
   case Inst::Shl:
   case Inst::ShlNSW:
@@ -1197,60 +1191,52 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::LShr:
   case Inst::LShrExact:
   case Inst::AShr:
-  case Inst::AShrExact: {
+  case Inst::AShrExact:
     if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
-  case Inst::Select: {
+  case Inst::Select:
     if (Ops[1] == Ops[2])
       return Ops[1];
     break;
-  }
 
   case Inst::ZExt:
   case Inst::SExt:
-  case Inst::Trunc: {
+  case Inst::Trunc:
     if (Width == Ops[0]->Width)
       return Ops[0];
     if (Ops[0]->K == Inst::Const)
       return IC.getConst(APInt(Width, Ops[0]->Val.getZExtValue()));
     break;
-  }
 
-  case Inst::Eq: {
+  case Inst::Eq:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, true));
     break;
-  }
 
-  case Inst::Ne: {
+  case Inst::Ne:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, false));
     break;
-  }
 
   case Inst::Ult:
-  case Inst::Slt: {
+  case Inst::Slt:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, false));
     break;
-  }
 
   case Inst::CtPop:
-  case Inst::BSwap: {
+  case Inst::BSwap:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return IC.getConst(APInt(Width, 0));
     break;
-  }
 
   case Inst::Cttz:
-  case Inst::Ctlz: {
+  case Inst::Ctlz:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return IC.getConst(APInt(Width, Width));
     break;
-  }
 
   default:
     break;
@@ -1268,9 +1254,9 @@ void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
 
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
                                         const std::string Prefix) {
-  std::string Post = "";
+  std::string Post;
   // Print component's name in debug mode
-  if (DebugLevel > 0 && Prefix == "") {
+  if (DebugLevel > 0 && Prefix.empty()) {
     std::string Str;
     auto Width = CompInstMap[Loc]->Width;
     if (Loc == O.first) {

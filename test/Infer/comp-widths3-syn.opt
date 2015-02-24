@@ -9,4 +9,4 @@
 %0:i32 = var
 %1:i64 = zext %0
 %2:i64 = addnw 1:i64, %1
-infer %2 
+infer %2
