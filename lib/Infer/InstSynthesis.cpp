@@ -22,15 +22,11 @@ using namespace llvm;
 
 namespace {
 
-static cl::opt<bool> DebugSynthesis("souper-synthesis-debug",
-    cl::desc("Synthesis debug (default=false)"),
-    cl::init(false));
 static cl::opt<unsigned> DebugLevel("souper-synthesis-debug-level",
-    cl::Hidden,
-    cl::desc("Synthesis debug level (default=1). "
+    cl::desc("Synthesis debug level (default=0). "
     "The larger the number is, the more fine-grained debug "
-    "information will be printed."),
-    cl::init(1));
+    "information will be printed"),
+    cl::init(0));
 static cl::opt<int> CmdMaxCompNum("souper-synthesis-comp-num",
     cl::desc("Maximum number of components (default=all)"),
     cl::init(-1));
@@ -42,6 +38,10 @@ static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost",
     cl::Hidden,
     cl::desc("Ignore cand inst cost (default=false)"),
     cl::init(false));
+static cl::opt<unsigned> MaxWiringAttempts("souper-synthesis-wiring-iterations",
+    cl::Hidden,
+    cl::desc("Number of convergence iterations of wirings that contain constants"),
+    cl::init(10));
 
 }
 
@@ -62,9 +62,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   RHS = 0;
 
   // The order is important
-  setCompLibrary();
   initInputVars(LHS, IC);
-  setDefaultWidth(LHS);
+  setCompLibrary(LHS);
+  filterFixedWidthIntrinsicComps();
   addZSTComps(LHS);
   initOutput(LHS, IC);
   initComponents(IC);
@@ -76,8 +76,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
   int LHSCost = cost(LHS);
 
-  if (DebugSynthesis && DebugLevel > 1)
-    printInitInfo();
+  if (DebugLevel > 0) {
+    llvm::outs() << "; starting synthesis for LHS\n";
+    ReplacementContext Context;
+    PrintReplacementRHS(llvm::outs(), LHS, Context);
+    if (DebugLevel > 2)
+      printInitInfo(LHS);
+  }
 
   setInvalidWirings();
 
@@ -97,10 +102,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Not-working candidate programs that contain constants must be forbidden
   // explicitly because constants are not constrainted by the inputs. Still, it
   // can take many iterations to converge. Therefore, we limit the number
-  // of attempts per such a candidate wiring using MaxWiringAttempts set to 10
-  // (number seen in papers)
+  // of attempts per such a candidate wiring via cmd flag MaxWiringAttempts
+  // (default value: 10)
   std::map<ProgramWiring, unsigned> NotWorkingConstWirings;
-  const unsigned MaxWiringAttempts = 10;
 
   // Ask the solver for four initial concrete inputs.
   // This number was derived experimentally giving a good overall speed-up
@@ -148,16 +152,10 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   if (MaxCompNum > (int)Comps.size())
     MaxCompNum = Comps.size();
 
-  if (DebugSynthesis && DebugLevel > 0) {
-    llvm::outs() << "starting synthesis for LHS:\n";
-    ReplacementContext Context;
-    PrintReplacementRHS(llvm::outs(), LHS, Context);
-  }
-
   // Iterative synthesis loop with increasing number of components
   for (int J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
-    if (DebugSynthesis && DebugLevel > 0)
+    if (DebugLevel > 1)
       llvm::outs() << "synthesizing using " << J << " component(s)\n";
     // If synthesis using 0 components failed (aka nop synthesis),
     // don't subsequently wire the output to the input(s)
@@ -177,9 +175,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     while (true) {
       Inst *Query = IC.getConst(APInt(1, true));
       // Put each set of concrete inputs into a separate copy of the WiringQuery
-      for (unsigned J = 0; J < S.size(); ++J) {
-        auto InputMap = S[J];
-        if (DebugSynthesis && DebugLevel > 1) {
+      for (unsigned K = 0; K < S.size(); ++K) {
+        auto InputMap = S[K];
+        if (DebugLevel > 2) {
           for (auto const &Input : InputMap) {
             if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
               continue;
@@ -187,7 +185,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                          << " to " << Input.second->Val << "\n";
           }
         }
-        if (J > 0) {
+        if (K > 0) {
           // Starting with the second concrete input set,
           // copy component input variables for query separation
           for (auto const &E : LocInstMap) {
@@ -212,7 +210,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       std::string QueryStr = BuildQuery({}, LoopPCs, Mapping,
                                         &ModelInsts, /*Negate=*/true);
       bool IsSat;
-      if (DebugSynthesis && DebugLevel > 0)
+      if (DebugLevel > 1)
         llvm::outs() << "solving synthesis constraint.. ";
       EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
                                     &ModelVals, Timeout);
@@ -221,11 +219,11 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
       // No valid wiring exists for the target comp number
       if (!IsSat) {
-        if (DebugSynthesis && DebugLevel > 0)
+        if (DebugLevel > 1)
           llvm::outs() << "UNSAT\n";
         break;
       } else {
-        if (DebugSynthesis && DebugLevel > 0)
+        if (DebugLevel > 1)
           llvm::outs() << "SAT\n";
       }
 
@@ -236,7 +234,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (!Cand)
         report_fatal_error("synthesis bug: creating inst from a model failed");
 
-      if (DebugSynthesis && DebugLevel > 0) {
+      if (DebugLevel > 1) {
         llvm::outs() << "candidate:\n";
         ReplacementContext Context;
         PrintReplacementRHS(llvm::outs(), Cand, Context);
@@ -255,15 +253,20 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
       // Success
       if (!IsSat) {
-        if (DebugSynthesis && DebugLevel > 0)
-          llvm::outs() << "synthesis succeeded using " << cost(Cand)
-                       << " components (LHS cost: " << LHSCost << ")\n";
+        if (DebugLevel > 0) {
+          int CandCost = cost(Cand);
+          int Benefit = LHSCost - CandCost;
+          llvm::outs() << "; LHS cost = " << LHSCost
+                       << ", RHS cost = " << CandCost
+                       << ", benefit = " << (Benefit > 0 ? Benefit : 0)
+                       << "\n";
+        }
         RHS = Cand;
         return EC;
       }
 
       Refinements++;
-      if (DebugSynthesis && DebugLevel > 0)
+      if (DebugLevel > 1)
         llvm::outs() << "didn't work for all inputs "
                      << "(#cex: "<< S.size()+1 << ", "
                      << "refinement: " << Refinements << ")\n";
@@ -275,7 +278,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
           auto In = ModelInsts[J];
           auto Val = ModelVals[J];
           InputMap[In] = IC.getConst(Val);
-          if (DebugSynthesis && DebugLevel > 1)
+          if (DebugLevel > 2)
             llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
         }
       }
@@ -302,7 +305,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         continue;
       }
       WI->second++;
-      if (DebugSynthesis && DebugLevel > 1) {
+      if (DebugLevel > 2) {
         llvm::outs() << "cand with constants, constraining wiring\n";
         if (WI->second == MaxWiringAttempts)
           llvm::outs() << "cand reached MaxWiringAttempts "
@@ -312,7 +315,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       for (auto const &Pair : CandWiring) {
         auto const &L_x = Pair.first;
         auto const &L_y = Pair.second;
-        if (DebugSynthesis && DebugLevel > 2)
+        if (DebugLevel > 3)
           llvm::outs() << getLocVarStr(L_x.first) << " == "
                        << getLocVarStr(L_y.first) << "\n";
         // Constrain the wiring
@@ -329,7 +332,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
           if (CI == ConstValMap.end())
             continue;
           auto const &Cons = CompInstMap[L_y.first];
-          if (DebugSynthesis && DebugLevel > 1)
+          if (DebugLevel > 2)
             llvm::outs() << "with constant " << getLocVarStr(L_y.first)
                          << " == " << CI->second << "\n";
           Eq = IC.getInst(Inst::Eq, 1, {Cons, IC.getConst(CI->second)});
@@ -340,22 +343,37 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     }
   }
 
+  if (DebugLevel > 0) {
+    llvm::outs() << "; no valid wiring found";
+    unsigned Cnt = 0;
+    for (auto const &Wiring : NotWorkingConstWirings)
+      if (Wiring.second >= MaxWiringAttempts)
+        Cnt++;
+    if (Cnt)
+      llvm::outs() << " (" << Cnt << " wiring(s) with constants reached "
+                   << MaxWiringAttempts << " MaxWiringAttempts)";
+    else if (hasOtherWidthComps(LHS))
+      llvm::outs() << " (LHS has comps of not-handled width)";
+    llvm::outs() << "\n";
+  }
+
   return EC;
 }
 
-void InstSynthesis::setCompLibrary() {
+void InstSynthesis::setCompLibrary(Inst *LHS) {
   if (!CmdMaxCompNum)
     return;
+  // First, choose which components to use
+  std::vector<Component> InitComps, InitConstComps;
   if (CmdUserCompKinds.size()) {
     std::vector<Inst::Kind> Kinds;
     // Parse user-provided component kind strings
     for (auto KindStr : splitString(CmdUserCompKinds.c_str())) {
       Inst::Kind K = Inst::getKind(KindStr);
-      UserCompKinds.insert(K);
-      if (KindStr == Inst::getKindName(Inst::Const)) { // Special case
-        ConstComps.push_back(Component{Inst::Const, 0, {}});
-      } else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
-        continue; // handled in addZSTComps
+      if (KindStr == Inst::getKindName(Inst::Const)) // Special case
+        InitConstComps.push_back(Component{Inst::Const, 0, {}});
+      else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
+        report_fatal_error("don't use zext/sext/trunc explicitly");
       else if (K == Inst::Kind(~0))
         report_fatal_error("unknown instruction: " + KindStr);
       else if (UnsupportedCompKinds.count(K))
@@ -366,13 +384,45 @@ void InstSynthesis::setCompLibrary() {
     for (auto const &Comp : CompLibrary)
       for (auto const &Kind : Kinds)
         if (Comp.Kind == Kind)
-          Comps.push_back(Comp);
+          InitComps.push_back(Comp);
   } else {
-    Comps = CompLibrary;
-    ConstComps.push_back(Component{Inst::Const, 0, {}});
-    llvm::outs() << "WARNING: using all " << Comps.size()
-                 << " components, synthesis will probably take long time"
-                 << " or run out of memory\n";
+    InitComps = CompLibrary;
+    InitConstComps.push_back(Component{Inst::Const, 0, {}});
+  }
+  // Second, for each input/constant width create a component of that width
+  for (auto const &Width : InputWidths) {
+    for (auto Comp : InitComps) {
+      if (!Comp.Width)
+        Comp.Width = Width;
+      for (auto &OpWidth : Comp.OpWidths)
+        if (!OpWidth)
+          OpWidth = Width;
+      Comps.push_back(Comp);
+    }
+    for (auto Const : InitConstComps) {
+      if (!Const.Width)
+        Const.Width = Width;
+      ConstComps.push_back(Const);
+    }
+  }
+  // Third, create input/constant component(s) for the output width
+  if (!InputWidths.count(LHS->Width)) {
+    if (InputWidths.size()) {
+      for (auto Comp : InitComps) {
+        if (Comp.Width && Comp.Width != LHS->Width)
+          continue;
+        if (!Comp.Width)
+          Comp.Width = LHS->Width;
+        for (auto &OpWidth : Comp.OpWidths)
+          if (!OpWidth)
+            OpWidth = LHS->Width;
+        Comps.push_back(Comp);
+      }
+    }
+    for (auto Const : InitConstComps) {
+      Const.Width = LHS->Width;
+      ConstComps.push_back(Const);
+    }
   }
 }
 
@@ -382,8 +432,10 @@ void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
   // Remove duplicates
   std::set<Inst *> TmpSet;
   for (auto I : Tmp)
-    if (TmpSet.insert(I).second)
+    if (TmpSet.insert(I).second) {
       Inputs.push_back(I);
+      InputWidths.insert(I->Width);
+    }
   for (unsigned J = 0; J < Inputs.size(); ++J) {
     // Note that location variable 0_0 is not used
     LocVar In = std::make_pair(0, J+1);
@@ -403,7 +455,7 @@ void InstSynthesis::initInputVars(Inst *LHS, InstContext &IC) {
 
 void InstSynthesis::initConstComponents(InstContext &IC) {
   for (unsigned J = 0; J < ConstComps.size(); ++J) {
-    auto &Comp = ConstComps[J];
+    auto const &Comp = ConstComps[J];
     // Treat constant comps as ordinary inputs
     LocVar In = std::make_pair(0, Inputs.size()+J+1);
     std::string LocVarStr = getLocVarStr(In, LOC_PREFIX);
@@ -415,86 +467,75 @@ void InstSynthesis::initConstComponents(InstContext &IC) {
     LocVarStr = getLocVarStr(In, CONST_PREFIX);
     LocInstMap[LocVarStr] = std::make_pair(In, Loc);
     // Update CompInstMap map with concrete Inst
-    Loc = IC.createVar(DefaultWidth, LocVarStr);
+    assert(Comp.Width && "const comp width not set");
+    Loc = IC.createVar(Comp.Width, LocVarStr);
     CompInstMap[In] = Loc;
   }
 }
 
-void InstSynthesis::setDefaultWidth(Inst *LHS) {
-  // Set the DefaultWidth of component instances to the max width seen in inputs
-  for (auto In : Inputs)
-    if (In->Width > DefaultWidth)
-      DefaultWidth = In->Width;
-  // No inputs, use output width
-  if (!DefaultWidth)
-    DefaultWidth = LHS->Width;
+void InstSynthesis::filterFixedWidthIntrinsicComps() {
+  // CtPop/BSwap/Cttz/Ctlz require specific widths
+  for (auto It = Comps.begin(); It != Comps.end();) {
+    assert(It->Width && "comp width not set");
+    if (It->Kind == Inst::BSwap && It->Width != 16 && It->Width != 32 &&
+        It->Width != 64)
+      It = Comps.erase(It);
+    else if (((It->Kind == Inst::CtPop) || (It->Kind == Inst::Ctlz) ||
+               (It->Kind == Inst::Cttz)) && It->Width != 8 &&
+               It->Width != 16 && It->Width != 32 &&
+               It->Width != 64 && It->Width != 256)
+      It = Comps.erase(It);
+    else
+      ++It;
+  }
 }
 
 void InstSynthesis::addZSTComps(Inst *LHS) {
-  bool TestMode = CmdUserCompKinds.size() ? true : false;
+  bool HasI1Comps = false;
 
-  // Extend all inputs to DefaultWidth
-  for (auto In : Inputs) {
-    if (In->Width < DefaultWidth) {
-      if (TestMode) {
-        if (UserCompKinds.count(Inst::ZExt))
-          Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {In->Width}});
-        if (UserCompKinds.count(Inst::SExt))
-          Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {In->Width}});
-      } else {
-        Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {In->Width}});
-        Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {In->Width}});
+  // Check if some i1 comps are available in the selected library
+  for (auto const &Comp : Comps)
+    if (Comp.Width == 1) {
+      HasI1Comps = true;
+      break;
+    }
+  // Extend each input
+  for (auto const &Width : InputWidths) {
+    // to larger input
+    for (auto const &Width2 : InputWidths) {
+      if (Width < Width2) {
+        Comps.emplace_back(Component{Inst::ZExt, Width2, {Width}});
+        Comps.emplace_back(Component{Inst::SExt, Width2, {Width}});
       }
+    }
+    // to larger output iN
+    if (Width < LHS->Width) {
+      Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {Width}});
+      Comps.emplace_back(Component{Inst::SExt, LHS->Width, {Width}});
     }
   }
   // It's common to extend from i1 (e.g. icmp output) to bigger iN
-  if (DefaultWidth > 1) {
-    if (TestMode) {
-      if (UserCompKinds.count(Inst::ZExt)) {
-        Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
-        if (DefaultWidth != LHS->Width && LHS->Width > 1)
-          Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {1}});
-      }
-      if (UserCompKinds.count(Inst::SExt)) {
-        Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
-        if (DefaultWidth != LHS->Width && LHS->Width > 1)
-          Comps.emplace_back(Component{Inst::SExt, LHS->Width, {1}});
-      }
-    } else {
-      Comps.emplace_back(Component{Inst::ZExt, DefaultWidth, {1}});
-      Comps.emplace_back(Component{Inst::SExt, DefaultWidth, {1}});
-      if (DefaultWidth != LHS->Width && LHS->Width > 1) {
-        Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {1}});
-        Comps.emplace_back(Component{Inst::SExt, LHS->Width, {1}});
-      }
+  if (!InputWidths.count(1) && HasI1Comps) {
+    for (auto const &Width : InputWidths) {
+      Comps.emplace_back(Component{Inst::ZExt, Width, {1}});
+      Comps.emplace_back(Component{Inst::SExt, Width, {1}});
     }
   }
-  // Sometimes the result is extended to bigger output iN
-  if (DefaultWidth < LHS->Width) {
-    if (TestMode) {
-      if (UserCompKinds.count(Inst::ZExt))
-        Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {DefaultWidth}});
-      if (UserCompKinds.count(Inst::SExt))
-        Comps.emplace_back(Component{Inst::SExt, LHS->Width, {DefaultWidth}});
-    } else {
-      Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {DefaultWidth}});
-      Comps.emplace_back(Component{Inst::SExt, LHS->Width, {DefaultWidth}});
-    }
+  // It's common to extend from i1 (e.g. icmp output) to bigger output iN
+  bool ExtendToOutput = !InputWidths.count(LHS->Width) && LHS->Width > 1;
+  if (!InputWidths.count(1) && HasI1Comps && ExtendToOutput) {
+    Comps.emplace_back(Component{Inst::ZExt, LHS->Width, {1}});
+    Comps.emplace_back(Component{Inst::SExt, LHS->Width, {1}});
   }
-  // Sometimes the result is truncated to smaller output iN
-  if (DefaultWidth > LHS->Width) {
-    if (TestMode) {
-      if (UserCompKinds.count(Inst::Trunc))
-        Comps.emplace_back(Component{Inst::Trunc, LHS->Width, {DefaultWidth}});
-    } else {
-      Comps.emplace_back(Component{Inst::Trunc, LHS->Width, {DefaultWidth}});
-    }
-  }
+  // Sometimes the comp result is truncated to some smaller output iN
+  for (auto const &Width : InputWidths)
+    if (Width > LHS->Width)
+      Comps.emplace_back(Component{Inst::Trunc, LHS->Width, {Width}});
 }
 
 void InstSynthesis::initComponents(InstContext &IC) {
   for (unsigned J = 0; J < Comps.size(); ++J) {
-    auto &Comp = Comps[J];
+    auto const &Comp = Comps[J];
     std::string LocVarStr;
     // First, init component inputs
     std::vector<Inst *> CompOps;
@@ -507,10 +548,8 @@ void InstSynthesis::initComponents(InstContext &IC) {
       P.emplace_back(In, Loc);
       // Create concrete component input encoded as a fresh variable
       LocVarStr = getLocVarStr(In, COMP_INPUT_PREFIX);
-      if (Comp.OpWidths[K] != 0)
-        Loc = IC.createVar(Comp.OpWidths[K], LocVarStr);
-      else
-        Loc = IC.createVar(DefaultWidth, LocVarStr);
+      assert(Comp.OpWidths[K] && "op width not set");
+      Loc = IC.createVar(Comp.OpWidths[K], LocVarStr);
       LocInstMap[LocVarStr] = std::make_pair(In, Loc);
       // Update CompInstMap map with concrete Inst
       CompInstMap[In] = Loc;
@@ -526,8 +565,7 @@ void InstSynthesis::initComponents(InstContext &IC) {
     R.emplace_back(Out, Loc);
 
     // Third, instantiate the component (aka Inst)
-    if (!Comp.Width)
-      Comp.Width = DefaultWidth;
+    assert(Comp.Width && "comp width not set");
     Loc = IC.getInst(Comp.Kind, Comp.Width, CompOps);
     // Update CompInstMap map with concrete Inst
     CompInstMap[Out] = Loc;
@@ -553,27 +591,30 @@ void InstSynthesis::initLocations() {
   L.push_back(O);
 }
 
-void InstSynthesis::printInitInfo() {
-  llvm::outs() << "number of inputs: " << Inputs.size() << ", "
+void InstSynthesis::printInitInfo(Inst *LHS) {
+  llvm::outs() << "inputs: " << Inputs.size() << ", "
                << "constants: " << ConstComps.size() << "\n";
   llvm::outs() << "N: " << N << ", M: " << M << "\n";
-  llvm::outs() << "default instruction width: " << DefaultWidth << "\n";
+  llvm::outs() << "input widths: ";
+  for (auto const &Width : InputWidths)
+    llvm::outs() << Width << " ";
+  if (InputWidths.size())
+    llvm::outs() << "\n";
+  llvm::outs() << "output width: " << LHS->Width << "\n";
   llvm::outs() << "component library: ";
-  for (auto const &Comp : Comps)
-    llvm::outs() << Inst::getKindName(Comp.Kind)
-                 << " (" << Comp.Width << ", " << Comp.OpWidths.size() << "); ";
-  llvm::outs() << "\n";
-  llvm::outs() << "instantiated components (unordered): ";
-  for (auto const &E : CompInstMap) {
-    if (E.first.second != 0 || E.first.first == Comps.size()+1)
-      continue;
-    llvm::outs() << Inst::getKindName(E.second->K)
-                 << " (" << E.second->Width << ", { ";
-    for (auto const &Op : E.second->orderedOps())
-      llvm::outs() << Op->Width << " ";
+  for (auto const &Comp : Comps) {
+    llvm::outs() << Inst::getKindName(Comp.Kind) << " (" << Comp.Width << ", { ";
+    for (auto const &Width : Comp.OpWidths)
+      llvm::outs() << Width << " ";
     llvm::outs() << "}); ";
   }
-  llvm::outs() << "\n";
+  if (Comps.size())
+    llvm::outs() << "\n";
+  llvm::outs() << "const components: ";
+  for (auto const &Comp : ConstComps)
+    llvm::outs() << "const (" << Comp.Width << "); ";
+  if (ConstComps.size())
+    llvm::outs() << "\n";
   llvm::outs() << "I: ";
   for (auto const &In : I)
     llvm::outs() << getLocVarStr(In.first) << " ";
@@ -650,7 +691,7 @@ void InstSynthesis::setInvalidWirings() {
 Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "consistency constraints:\n";
   // Don't wire the outputs of two components
   for (unsigned J = 0; J < R.size(); ++J) {
@@ -660,7 +701,7 @@ Inst *InstSynthesis::getConsistencyConstraint(InstContext &IC) {
       InvalidWirings.insert(std::make_pair(L_x.first, L_y.first));
       Inst *Ne = IC.getInst(Inst::Ne, 1, {L_x.second, L_y.second});
       Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
-      if (DebugSynthesis && DebugLevel > 1)
+      if (DebugLevel > 2)
         llvm::outs() << getLocVarStr(L_x.first) << " != "
                      << getLocVarStr(L_y.first) << "\n";
     }
@@ -687,7 +728,7 @@ void InstSynthesis::addConstraints(std::vector<InstMapping> &PCs,
 Inst *InstSynthesis::getAcyclicityConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "acyclicity constraints:\n";
   // Component inputs
   for (auto const &L_x : P) {
@@ -696,7 +737,7 @@ Inst *InstSynthesis::getAcyclicityConstraint(InstContext &IC) {
                                        + LOC_SEP + "0";
     assert(LocInstMap.count(LocVarStr) && "unknown location variable");
     auto const &L_y = LocInstMap[LocVarStr];
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << getLocVarStr(L_x.first) << " < "
                    << L_x.first.first << LOC_SEP << "0" << "\n";
     Inst *Ult = IC.getInst(Inst::Ult, 1, {L_x.second, L_y.second});
@@ -709,13 +750,13 @@ Inst *InstSynthesis::getAcyclicityConstraint(InstContext &IC) {
 Inst *InstSynthesis::getLocVarConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "location variable constraints:\n";
   std::vector<LocInst> Tmp(P.begin(), P.end());
   Tmp.insert(Tmp.end(), I.begin(), I.end());
   // All inputs
   for (auto const &L_x : Tmp) {
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << "0 <= " << getLocVarStr(L_x.first)
                    << " < " << M << "\n";
     Inst *Ult =
@@ -734,7 +775,7 @@ Inst *InstSynthesis::getLocVarConstraint(InstContext &IC) {
     Inst *Ult = 0;
     Ult = IC.getInst(Inst::Ult, 1,
                      {L_x.second, IC.getConst(APInt(L_x.second->Width, N))});
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << N << " <= " << getLocVarStr(L_x.first);
     Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, false))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
@@ -742,7 +783,7 @@ Inst *InstSynthesis::getLocVarConstraint(InstContext &IC) {
     Ult = IC.getInst(Inst::Ult, 1, {L_x.second,
                                     IC.getConst(APInt(L_x.second->Width,
                                                 M))});
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << " < " << M << "\n";
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
   }
@@ -756,7 +797,7 @@ Inst *InstSynthesis::getOutputLocVarConstraint(int Begin, int End,
 
   Inst *Ult = IC.getInst(Inst::Ult, 1,
                          {O.second, IC.getConst(APInt(O.second->Width, Begin))});
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << Begin << " <= " << getLocVarStr(O.first);
 
   Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, false))});
@@ -765,7 +806,7 @@ Inst *InstSynthesis::getOutputLocVarConstraint(int Begin, int End,
   Ult = IC.getInst(Inst::Ult, 1, {O.second,
                                   IC.getConst(APInt(O.second->Width,
                                               End))});
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << " < " << End << "\n";
   Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
 
@@ -775,7 +816,7 @@ Inst *InstSynthesis::getOutputLocVarConstraint(int Begin, int End,
 Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
-  if (DebugSynthesis && DebugLevel > 2)
+  if (DebugLevel > 3)
     llvm::outs() << "possible wirings:\n";
   for (unsigned J = 0; J < L.size(); ++J) {
     for (unsigned K = J+1; K < L.size(); ++K) {
@@ -786,7 +827,7 @@ Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
         continue;
       auto const &X = CompInstMap[L_x.first];
       auto const &Y = CompInstMap[L_y.first];
-      if (DebugSynthesis && DebugLevel > 2)
+      if (DebugLevel > 3)
         llvm::outs() << getLocVarStr(L_x.first) << " == "
                      << getLocVarStr(L_y.first) << "\n";
       // (l_x = l_y) => x = y
@@ -804,7 +845,7 @@ Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
 Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "input-definedness constraints:\n";
   for (auto const &L_x : P) {
     unsigned Width = CompInstMap[L_x.first]->Width;
@@ -815,7 +856,7 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
         continue;
       Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, In.second});
       Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
-      if (DebugSynthesis && DebugLevel > 1)
+      if (DebugLevel > 2)
         llvm::outs() << getLocVarStr(L_x.first) << " == "
                      << getLocVarStr(In.first) << " || ";
     }
@@ -828,15 +869,15 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
         continue;
       Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
       Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
-      if (DebugSynthesis && DebugLevel > 1)
+      if (DebugLevel > 2)
         llvm::outs() << getLocVarStr(L_x.first) << " == "
                      << getLocVarStr(L_y.first) << " || ";
     }
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << "false\n";
-    // Add to result
-    if (Ante != IC.getConst(APInt(1, false)))
-      Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
+    if (Ante == IC.getConst(APInt(1, false)))
+      report_fatal_error("no input-definedness for " + getLocVarStr(L_x.first));
+    Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
   }
 
   return Ret;
@@ -845,7 +886,7 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
 Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, false));
 
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "output-definedness constraints:\n";
   unsigned Width = CompInstMap[O.first]->Width;
   // Inputs
@@ -854,7 +895,7 @@ Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
       continue;
     Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, In.second});
     Ret = IC.getInst(Inst::Or, 1, {Ret, Eq});
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << getLocVarStr(O.first) << " == "
                    << getLocVarStr(In.first) << " || ";
   }
@@ -864,11 +905,11 @@ Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
       continue;
     Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, L_y.second});
     Ret = IC.getInst(Inst::Or, 1, {Ret, Eq});
-    if (DebugSynthesis && DebugLevel > 1)
+    if (DebugLevel > 2)
       llvm::outs() << getLocVarStr(O.first) << " == "
                    << getLocVarStr(L_y.first) << " || ";
   }
-  if (DebugSynthesis && DebugLevel > 1)
+  if (DebugLevel > 2)
     llvm::outs() << "false\n";
 
   return Ret;
@@ -906,7 +947,7 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
   auto Right = getLocVarStr(OutLoc, LOC_PREFIX);
   CandWiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
 
-  if (DebugSynthesis && DebugLevel > 2) {
+  if (DebugLevel > 3) {
     llvm::outs() << "found valid wiring, output "
                  << getLocVarStr(OutLoc) << ".\n";
     llvm::outs() << "line\tlocations\n";
@@ -919,7 +960,7 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
   }
 
   auto OpLocs = getOpLocs(OutLoc);
-  if (DebugSynthesis && DebugLevel > 2) {
+  if (DebugLevel > 3) {
     llvm::outs() << "creating program from wiring\n";
     llvm::outs() << "- starting with OutLoc " << getLocVarStr(OutLoc)
                  << ", OpLocs { ";
@@ -956,7 +997,7 @@ Inst *InstSynthesis::createInstFromWiring(
     CandWiring.emplace_back(LocInstMap[Left], LocInstMap[Right]);
     // Get operand locations of the wiring location
     auto Res = getOpLocs(Match);
-    if (DebugSynthesis && DebugLevel > 2) {
+    if (DebugLevel > 3) {
       llvm::outs() << "- continue with OutLoc " << getLocVarStr(Match)
                    << ", OpLocs {";
       for (auto const &R : Res)
@@ -972,14 +1013,14 @@ Inst *InstSynthesis::createInstFromWiring(
 
   // It it a constant?
   if (ConstValMap.count(OutLoc)) {
-    if (DebugSynthesis && DebugLevel > 2)
+    if (DebugLevel > 3)
       llvm::outs() << "- creating constant inst " << getLocVarStr(OutLoc)
                    << " with value " << ConstValMap.at(OutLoc) << "\n";
     return IC.getConst(ConstValMap.at(OutLoc));
   }
   // Is it an input?
   if (OutLoc.first == 0) {
-    if (DebugSynthesis && DebugLevel > 2)
+    if (DebugLevel > 3)
       llvm::outs() << "- creating input inst " << getLocVarStr(OutLoc) << "\n";
     return CompInstMap[OutLoc];
   }
@@ -987,7 +1028,7 @@ Inst *InstSynthesis::createInstFromWiring(
   Component Comp = Comps[OutLoc.first-1];
   assert(OutLoc.first >= 1 && "invalid component location variable");
   assert((Ops.size() == Comp.OpWidths.size()) && "op num mismatch");
-  if (DebugSynthesis && DebugLevel > 2) {
+  if (DebugLevel > 3) {
     llvm::outs() << "- creating inst " << Inst::getKindName(Comp.Kind)
                  << ", width " << Comp.Width << "\n";
     llvm::outs() << "before junk removal:\n";
@@ -1063,24 +1104,24 @@ LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
   LocVar Match;
   bool FoundMatch = false;
 
-  if (DebugSynthesis && DebugLevel > 2)
+  if (DebugLevel > 3)
     llvm::outs() << "- looking for OpLoc wiring "
                  << getLocVarStr(OpLoc) << "\n";
   for (auto const &E : LineWiring) {
     if (E.second.count(OpLoc)) {
-      if (DebugSynthesis && DebugLevel > 2)
+      if (DebugLevel > 3)
         llvm::outs() << "- found wiring input on line " << E.first << ", taking ";
       for (auto const &In : E.second) {
         // Take either input, constant, or component output of matching width
         if ((In.first == 0 || In.second == 0) && !isWiringInvalid(In, OpLoc)) {
           Match = In;
-          if (DebugSynthesis && DebugLevel > 2)
+          if (DebugLevel > 3)
             llvm::outs() << getLocVarStr(Match);
           FoundMatch = true;
           break;
         }
       }
-      if (DebugSynthesis && DebugLevel > 2)
+      if (DebugLevel > 3)
         llvm::outs() << "\n";
     }
     if (FoundMatch)
@@ -1097,57 +1138,51 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::Add:
   case Inst::AddNSW:
   case Inst::AddNUW:
-  case Inst::AddNW: {
+  case Inst::AddNW:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return Ops[1];
     else if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
   case Inst::Sub:
   case Inst::SubNSW:
   case Inst::SubNUW:
-  case Inst::SubNW: {
+  case Inst::SubNW:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(Width, 0));
     else if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
   case Inst::Mul:
   case Inst::MulNSW:
   case Inst::MulNUW:
-  case Inst::MulNW: {
+  case Inst::MulNW:
     if (Ops[0] == IC.getConst(APInt(Width, 1)))
       return Ops[1];
     else if (Ops[1] == IC.getConst(APInt(Width, 1)))
       return Ops[0];
     break;
-  }
 
   case Inst::UDiv:
   case Inst::SDiv:
   case Inst::UDivExact:
-  case Inst::SDivExact: {
+  case Inst::SDivExact:
     if (Ops[1] == IC.getConst(APInt(Width, 1)))
       return Ops[0];
     break;
-  }
 
   case Inst::And:
-  case Inst::Or: {
+  case Inst::Or:
     if (Ops[0] == Ops[1])
       return Ops[0];
     break;
-  }
 
-  case Inst::Xor: {
+  case Inst::Xor:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(Width, 0));
     break;
-  }
 
   case Inst::Shl:
   case Inst::ShlNSW:
@@ -1156,60 +1191,52 @@ Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
   case Inst::LShr:
   case Inst::LShrExact:
   case Inst::AShr:
-  case Inst::AShrExact: {
+  case Inst::AShrExact:
     if (Ops[1] == IC.getConst(APInt(Width, 0)))
       return Ops[0];
     break;
-  }
 
-  case Inst::Select: {
+  case Inst::Select:
     if (Ops[1] == Ops[2])
       return Ops[1];
     break;
-  }
 
   case Inst::ZExt:
   case Inst::SExt:
-  case Inst::Trunc: {
+  case Inst::Trunc:
     if (Width == Ops[0]->Width)
       return Ops[0];
     if (Ops[0]->K == Inst::Const)
       return IC.getConst(APInt(Width, Ops[0]->Val.getZExtValue()));
     break;
-  }
 
-  case Inst::Eq: {
+  case Inst::Eq:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, true));
     break;
-  }
 
-  case Inst::Ne: {
+  case Inst::Ne:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, false));
     break;
-  }
 
   case Inst::Ult:
-  case Inst::Slt: {
+  case Inst::Slt:
     if (Ops[0] == Ops[1])
       return IC.getConst(APInt(1, false));
     break;
-  }
 
   case Inst::CtPop:
-  case Inst::BSwap: {
+  case Inst::BSwap:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return IC.getConst(APInt(Width, 0));
     break;
-  }
 
   case Inst::Cttz:
-  case Inst::Ctlz: {
+  case Inst::Ctlz:
     if (Ops[0] == IC.getConst(APInt(Width, 0)))
       return IC.getConst(APInt(Width, Width));
     break;
-  }
 
   default:
     break;
@@ -1227,24 +1254,20 @@ void InstSynthesis::getInputVars(Inst *I, std::vector<Inst *> &InputVars) {
 
 std::string InstSynthesis::getLocVarStr(const LocVar &Loc,
                                         const std::string Prefix) {
-  std::string Post = "";
+  std::string Post;
   // Print component's name in debug mode
-  if (DebugSynthesis && Prefix == "") {
+  if (DebugLevel > 0 && Prefix.empty()) {
     std::string Str;
-    unsigned Width;
+    auto Width = CompInstMap[Loc]->Width;
     if (Loc == O.first) {
       Str = "output";
-      Width = CompInstMap[Loc]->Width;
     } else if (Loc.first == 0 && Loc.second > Inputs.size()) {
       Str = "const";
-      Width = CompInstMap[Loc]->Width;
     } else if (Loc.first == 0) {
       Str = "input";
-      Width = CompInstMap[Loc]->Width;
     } else {
       auto const &Comp = Comps[Loc.first-1];
       Str = std::string(Inst::getKindName(Comp.Kind));
-      Width = Comp.Width;
     }
     Post = " (" + Str + ",i" + std::to_string(Width) + ")";
   }
@@ -1321,6 +1344,15 @@ bool InstSynthesis::hasConst(Inst *I) {
   bool Res = false;
   for (auto Iz : I->orderedOps())
     Res |= hasConst(Iz);
+  return Res;
+}
+
+bool InstSynthesis::hasOtherWidthComps(Inst *I) {
+  if (!InputWidths.count(I->Width))
+    return true;
+  bool Res = false;
+  for (auto Iz : I->orderedOps())
+    Res |= hasOtherWidthComps(Iz);
   return Res;
 }
 

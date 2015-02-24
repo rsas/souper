@@ -90,8 +90,8 @@ static const std::set<Inst::Kind> UnsupportedCompKinds = {
 
 /// Supported component library.
 /// The width of most of the instructions is unknown in advance, therefore, we
-/// indicate this by setting the Width to 0. During initialization, the width
-/// will be set to the DefaultWidth (maximum width of the input vars).
+/// indicate this by setting the Width to 0. Per each input of distinct width,
+/// a component of that width is instantiated.
 /// Again, note that constants are treated as ordinary inputs
 static const std::vector<Component> CompLibrary = {
   Component{Inst::Add, 0, {0,0}},
@@ -139,10 +139,9 @@ private:
   std::vector<Component> Comps;
   /// Constant components
   std::vector<Component> ConstComps;
-  /// User supplied components kinds
-  std::set<Inst::Kind> UserCompKinds;
   /// Program inputs
   std::vector<Inst *> Inputs;
+  std::set<unsigned> InputWidths;
   /// Input location set I
   std::vector<LocInst> I;
   /// Component input location set P
@@ -160,9 +159,7 @@ private:
   /// A mapping from a location variable to a concrete component instance,
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
-  /// Default component inst width
-  unsigned DefaultWidth = 0;
-  /// LocInst width is fixed
+  /// Location variable's width is fixed
   const unsigned LocInstWidth = 32;
   /// A mapping from a location variable's string representation to its location.
   /// Required during model parsing
@@ -171,13 +168,10 @@ private:
   std::set<std::pair<LocVar, LocVar>> InvalidWirings;
 
   /// Initialize components to be used during synthesis
-  void setCompLibrary();
+  void setCompLibrary(Inst *LHS);
 
   /// Initalize input variable locations
   void initInputVars(Inst *LHS, InstContext &IC);
-
-  /// Set default component inst width
-  void setDefaultWidth(Inst *LHS);
 
   /// Add extra width manipulations components (zext/sext/trunc)
   /// to handle varying input/output widths
@@ -197,7 +191,7 @@ private:
   void initLocations();
 
   /// Print some debug info on initial synthesis settings
-  void printInitInfo();
+  void printInitInfo(Inst *LHS);
 
   /// Set particular wirings to be invalid (e.g. width mismatches).
   /// These invalid wirings are not encoded as constraints, they are
@@ -283,6 +277,7 @@ private:
                            std::vector<Inst *> &Ops, InstContext &IC);
 
   /// Helper functions
+  void filterFixedWidthIntrinsicComps();
   void getInputVars(Inst *I, std::vector<Inst *> &InputVars);
   std::string getLocVarStr(const LocVar &Loc, const std::string Prefix="");
   LocVar getLocVarFromStr(const std::string &Str);
@@ -292,6 +287,7 @@ private:
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
   bool hasConst(Inst *I);
+  bool hasOtherWidthComps(Inst *I);
 
 };
 
