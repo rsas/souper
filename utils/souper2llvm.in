@@ -16,7 +16,7 @@
 
 import fileinput, sys, copy
 
-widths = dict()
+widths, knownbits = dict(), dict()
 pcmap, argmap = dict(), dict()
 cand = None
 needsResult = False
@@ -121,7 +121,10 @@ def parseInst(i):
         if "overflow" in i[2]:
             width = "i" + str(int(width[1:])-1)
         widths[reg] = width
-        ops = parseOps(i[3:])
+        if inst == "var":
+            ops = i[3:]
+        else:
+            ops = parseOps(i[3:])
     else:
         assert 0, "unknown LHS: %s" % i[0]
     return [reg, width, inst, ops]
@@ -220,6 +223,9 @@ def propagateArgNames(insts):
             newreg = "%x" + str(counter)
             argmap[reg] = newreg
             widths[newreg] = width
+            if len(ops):
+                assert len(ops) == 1, "one mask expected, got %d" % len(ops)
+                knownbits[newreg] = parseKnownBits(ops[0])
             counter += 1
             continue
         for k, op in enumerate(ops):
@@ -376,6 +382,34 @@ def rewriteOps(inst, newregs, ops):
            assert op[0] in newregs, "unknown reg %s, reordering bug in %s" % (op[0], i)
            ops[j][0] = newregs[op[0]]
 
+def parseKnownBits(s):
+    assert "(" in s and ")" in s
+    s = s.strip("(").strip(")")
+    zeromask = 0
+    onemask = 0
+    all = 0
+    bit = 0
+    for c in s[::-1]:
+        all += 1<<bit
+        if c == '0':
+            zeromask += 1<<bit
+        if c == '1':
+            onemask += 1<<bit
+        bit += 1
+    print ";for " + str(bit) + " bit value " + s
+    if zeromask != 0:
+        zeromask = zeromask ^ all
+        print ";val = val & " + str(zeromask)
+    else:
+        print ";no zero mask needed"
+    if onemask != 0:
+        print ";val = val | " + str(onemask)
+    else:
+        print ";no one mask needed"
+    print
+    # TODO: return the correct mask for and
+    return s
+
 def printFuncHeader():
     # global declarations: dummy store, intrinsics
     print "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n"
@@ -383,6 +417,8 @@ def printFuncHeader():
     print "@dummy2 = global i32 0, align 4"
     print "@dummy3 = global i32 0, align 4"
     print
+    for i, reg in enumerate(argmap.values()):
+        print "@glob_" + reg[1:] + " = external global " + widths[reg]
     for decl in intrdecl.values():
         print decl
     print "\ndefine void @foo(",
@@ -394,6 +430,14 @@ def printFuncHeader():
     print ") {"
     # first label
     print labels[0] + ":"
+    # masks
+    for i, reg in enumerate(argmap.values()):
+        if not reg in knownbits:
+            continue
+        w = widths[reg]
+        regnum = reg[1:]
+        print "  %tmp_" + regnum + " = and " + w + " " + reg + ", " + knownbits[reg]
+        print "  store " + w + " " + "%tmp_" + regnum + ", " + w + "* @glob_" + regnum
 
 def printFuncBody(insts):
     for i in insts:
