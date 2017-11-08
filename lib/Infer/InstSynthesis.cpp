@@ -102,8 +102,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getConsistencyConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getAcyclicityConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
-  WiringPCs.emplace_back(getInputDefinednessConstraint(IC), TrueConst);
-  WiringPCs.emplace_back(getOutputDefinednessConstraint(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentInputConstraint2(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint(IC);
@@ -460,6 +461,8 @@ void InstSynthesis::initComponents(InstContext &IC) {
       CompInstMap[In] = OpInst;
       CompOps.push_back(OpInst);
     }
+    // Store all inputs
+    CompOpInstMap[J+1] = CompOps;
 
     // Second, init component output
     LocVar Out = std::make_pair(J+1, 0);
@@ -741,7 +744,7 @@ Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
   return Ret;
 }
 
-Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
+Inst *InstSynthesis::getComponentInputConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
   if (DebugLevel > 2)
@@ -781,7 +784,8 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
   return Ret;
 }
 
-Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
+
+Inst *InstSynthesis::getComponentOutputConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, false));
 
   if (DebugLevel > 2)
@@ -808,6 +812,45 @@ Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
   }
   if (DebugLevel > 2)
     llvm::outs() << "false\n";
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getComponentInputConstraint2(InstContext &IC) {
+  Inst *Ret = IC.getConst(APInt(1, true));
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component input-to-constant constraints:\n";
+  // 
+  for (auto const &E : CompOpInstMap) {
+    Inst *CompAnte = IC.getConst(APInt(1, true));
+    for (unsigned K = 0; K < E.second.size(); ++K) {
+      Inst *Ante = IC.getConst(APInt(1, false));
+      LocVar CompIn = std::make_pair(E.first, K+1);
+      std::string LocVarStr = getLocVarStr(CompIn, LOC_PREFIX);
+      //LocInstMap[LocVarStr] = std::make_pair(In, Loc);
+      for (auto const &In : I) {
+        if (!isInputConst(In.first))
+          continue;
+        if (isWiringInvalid(CompIn, In.first))
+          continue;
+        //Inst *Eq = IC.getInst(Inst::Eq, 1, {E.second[K], CompInstMap[In.first]});
+        Inst *Eq = IC.getInst(Inst::Eq, 1, {LocInstMap[LocVarStr].second, In.second});
+        Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
+        if (DebugLevel > 2)
+          llvm::outs() << getLocVarStr(CompIn) << " == "
+                       << getLocVarStr(In.first) << " || ";
+      }
+      if (DebugLevel > 2)
+        llvm::outs() << "false\n";
+      CompAnte = IC.getInst(Inst::And, 1, {CompAnte, Ante});
+    }
+    if (DebugLevel > 2)
+      llvm::outs() << "false\n";
+    Inst *Ne = IC.getInst(Inst::Eq, 1, {CompAnte, IC.getConst(APInt(1, false))});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
+  }
+  //Ret = IC.getInst(Inst::Eq, 1, {Ret, IC.getConst(APInt(1, false))});
 
   return Ret;
 }
@@ -1242,6 +1285,18 @@ std::vector<std::string> InstSynthesis::splitString(const char *S, char Del) {
 bool InstSynthesis::isWiringInvalid(const LocVar &Left, const LocVar &Right) {
   return (InvalidWirings.count(std::make_pair(Left, Right)) ||
           InvalidWirings.count(std::make_pair(Right, Left)));
+}
+
+bool InstSynthesis::isInputConst(const LocVar &Loc) {
+  if (Loc.first != 0)
+    return false;
+
+  if (!LocInstMap.count(getLocVarStr(Loc, CONST_PREFIX)))
+    return false;
+
+  assert(In.second >= I.size()-ConstComps.size());
+
+  return true;
 }
 
 void InstSynthesis::forbidInvalidCandWiring(const ProgramWiring &CandWiring,
