@@ -1,0 +1,13 @@
+; Static profile 1
+; Function: inc_ugly
+%0:i32 = var
+%1:i32 = and 1:i32, %0
+%2:i1 = eq 0:i32, %1
+pc %2 0:i1
+%3:i32 = and 2:i32, %0
+%4:i1 = eq 0:i32, %3
+pc %4 1:i1
+%5:i32 = and 4294967292:i32, %0
+%6:i32 = or 2:i32, %5
+%7:i32 = add 1:i32, %0
+infer %7

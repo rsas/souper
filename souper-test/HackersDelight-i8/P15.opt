@@ -1,0 +1,17 @@
+; REQUIRES: solver, solver-model, synthesis
+
+; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-ignore-cost -souper-synthesis-comps=sub,const,or,lshr,xor %s > %t1
+; RUN: FileCheck %s < %t1
+
+; CHECK: {{(%6:i8 = or (%0|%1), %3)?}}
+; CHECK: {{(%7:i8 = sub %6, %4)?}}
+; CHECK: result {{(%7|%5)}}
+
+; Ceil of average of two unsigned integers without over-flowing
+%0:i8 = var
+%1:i8 = var
+%2:i8 = or %0, %1
+%3:i8 = xor %0, %1
+%4:i8 = lshr %3, 1
+%5:i8 = sub %2, %4
+infer %5

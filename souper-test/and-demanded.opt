@@ -1,0 +1,5 @@
+%x:i8 = var (knownBits=111111xx)
+%y:i8 = var
+%out = and %x, %y
+infer %out (demandedBits=11111100)
+;result %y 

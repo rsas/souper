@@ -1,0 +1,18 @@
+; REQUIRES: solver, solver-model, synthesis
+
+; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-ignore-cost -souper-synthesis-comps=const,const,and,add,or,sub %s > %t1
+; RUN: FileCheck %s < %t1
+
+; CHECK: {{(%5:i64 = add %0, %0|%5:i64 = and %3, %2)}}
+; CHECK: {{(%6:i64 = or %0, %5|result %5)}}
+; CHECK: {{(%7:i64 = sub %0, %6)?}}
+; CHECK: {{(%8:i64 = and %0, %7)?}}
+; CHECK: {{(result %8)?}}
+
+; Turn-off the right-most contiguous string of 1 bits
+%0:i64 = var
+%1:i64 = sub %0, 1
+%2:i64 = or %0, %1
+%3:i64 = add %2, 1
+%4:i64 = and %3, %0
+infer %4

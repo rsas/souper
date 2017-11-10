@@ -1,0 +1,15 @@
+; REQUIRES: solver, solver-model, synthesis
+
+; RUN: %souper-check %solver -infer-rhs -souper-infer-inst -souper-synthesis-ignore-cost -souper-synthesis-comps=const,xor,sub,and,const %s > %t1
+; RUN: FileCheck %s < %t1
+
+; CHECK:      %4:i64 = {{(and|xor)}} %0, %1
+; CHECK-NEXT: %5:i64 = {{(xor|and)}} %1, %4
+; CHECK-NEXT: result %5
+
+; Form a mask that identifies the trailing 0's
+%0:i64 = var
+%1:i64 = sub %0, 1
+%2:i64 = xor %0, -1
+%3:i64 = and %1, %2
+infer %3

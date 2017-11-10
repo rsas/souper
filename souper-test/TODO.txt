@@ -1,0 +1,110 @@
+
+## Forbid symmetric wirings (and x,y vs and y,x)
+
+line	locations
+0	0_3 (const,i8) 1_1 (add,i8) 1_2 (add,i8) 
+1	0_2 (const,i8) 2_1 (and,i8) 
+2	0_1 (input,i8) 2_2 (and,i8) 
+3	2_0 (and,i8) 3_0 (output,i8) 
+4	1_0 (add,i8) 
+
+before junk removal:
+%28:i8 = and 0:i8, %1
+result %28
+candidate:
+result %28
+didn't work for all inputs (#cex: 6, refinement: 22)
+counterexample: in_0_1 = 1
+cand with constants, constraining wiring
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+2_2 (and,i8) == 0_1 (input,i8)
+
+line	locations
+0	0_2 (const,i8) 0_3 (const,i8) 1_2 (add,i8) 2_2 (and,i8) 
+1	0_1 (input,i8) 1_1 (add,i8) 2_1 (and,i8) 
+3	2_0 (and,i8) 3_0 (output,i8) 
+4	1_0 (add,i8) 
+
+before junk removal:
+result %28
+candidate:
+result %28
+didn't work for all inputs (#cex: 6, refinement: 25)
+counterexample: in_0_1 = 1
+cand with constants, constraining wiring
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_1 (input,i8)
+2_2 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+
+------
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+1_2 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+2_2 (and,i8) == 0_1 (input,i8)
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_1 (input,i8)
+1_2 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+2_2 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_1 (input,i8)
+2_2 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_3 (const,i8)
+with constant 0_3 (const,i8) == 0
+1_2 (add,i8) == 0_3 (const,i8)
+with constant 0_3 (const,i8) == 0
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_1 (input,i8)
+2_2 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_3 (const,i8)
+with constant 0_3 (const,i8) == 0
+1_2 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_1 (input,i8)
+1_2 (add,i8) == 0_3 (const,i8)
+with constant 0_3 (const,i8) == 0
+2_2 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+2_2 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_1 (input,i8)
+1_2 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+
+3_0 (output,i8) == 2_0 (and,i8)
+2_1 (and,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+2_2 (and,i8) == 1_0 (add,i8)
+1_1 (add,i8) == 0_2 (const,i8)
+with constant 0_2 (const,i8) == 0
+1_2 (add,i8) == 0_1 (input,i8)
+
+## Don’t try other input constants if one is not working
+
+synthesis returns UNSAT!!
+
+## reconstruction is buggy
+
+## a component shall have only one possible input in the synthesis result, not many!
+
+## iterative adding of constants
+
+## add assertion if on one line one input can have several possibilities
