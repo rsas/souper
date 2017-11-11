@@ -81,6 +81,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   initConstComponents(IC);
   initLocations();
 
+
   N = I.size();
   M = Comps.size() + N;
   assert(M < (1<<LocInstWidth) && "too many inputs and components");
@@ -205,6 +206,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         llvm::outs() << "candidate:\n";
         PrintReplacementRHS(llvm::outs(), Cand, Context);
       }
+
+      if (!CandSeen.insert(Cand).second)
+        report_fatal_error("synthesis bug: candidate has been seen already");
 
       // The synthesis loop assumes that each component has a cost of one.
       // However, this is not the case for all components (e.g., bswap).
