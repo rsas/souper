@@ -182,6 +182,8 @@ private:
   std::map<std::string, LocInst> LocInstMap;
   /// Invalid wirings
   std::set<std::pair<LocVar, LocVar>> InvalidWirings;
+  /// Seen candidates for duplicate detection
+  std::set<Inst *> CandSeen;
 
   /// Initialize components to be used during synthesis
   void setCompLibrary();
