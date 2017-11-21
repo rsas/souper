@@ -1,0 +1,9 @@
+
+%0:i8 = var
+%1:i8 = add 1:i8, %0
+%2:i1 = trunc %1
+infer %2
+
+;%3:i8 = add %0, 1:i8
+;%4:i1 = trunc %3
+;result %4
