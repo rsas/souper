@@ -1,6 +1,24 @@
 
 ## Forbid symmetric wirings (and x,y vs and y,x)
 
+Idea: For each symmetric component and its inputs (assuming two p1, p2 here):
+1. Iterate over inputs (inputs i1, .., in incl. constants, other component outputs o1, ..., on) pair-wise i1, i2; i1, i3 etc.
+2. Add a following constraint that forbids symmetry
+
+Inst::Select 
+cond (p1 == i1 && p2 == i2) 
+then (p1 != i2 && p2 != i1) == true
+else true
+
+Inst::Select 
+cond (p1 == i2 && p2 == i1) 
+then (p1 != i1 && p2 != i2) == true
+else true
+
+2. Inst:And of all components constraints from 2. The result must be true.
+
+## This one below shall not appear anymore
+
 line	locations
 0	0_3 (const,i8) 1_1 (add,i8) 1_2 (add,i8) 
 1	0_2 (const,i8) 2_1 (and,i8) 
