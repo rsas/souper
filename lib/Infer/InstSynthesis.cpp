@@ -105,6 +105,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getComponentInputConstraint2(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentInputConstraint3(IC), TrueConst);
   WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
@@ -855,6 +856,37 @@ Inst *InstSynthesis::getComponentInputConstraint2(InstContext &IC) {
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
   }
   //Ret = IC.getInst(Inst::Eq, 1, {Ret, IC.getConst(APInt(1, false))});
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getComponentInputConstraint3(InstContext &IC) {
+  Inst *Ret = IC.getConst(APInt(1, true));
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component symmetry constraints:\n";
+  // 
+
+  const std::set<Inst::Kind> SymmetricComps = {
+    Inst::Add, Inst::Mul, Inst::And, Inst::Or, Inst::Xor,
+    Inst::Eq, Inst::Ne,
+    Inst::AddNSW, Inst::AddNUW, Inst::AddNW,
+    Inst::MulNSW, Inst::MulNUW, Inst::MulNW,
+  };
+  
+  // Add, Mul, And, Or, Xor
+  // AddNSW, AddNUW, AddNW, MulNSW, MulNUW, MulNW
+  // Eq, Ne
+  for (auto const &E : CompOpInstMap) {
+    LocVar Out = std::make_pair(E.first, 0);
+    Inst *OutInst = CompInstMap[Out];
+    if (!SymmetricComps.count(OutInst->K))
+      continue;
+  if (DebugLevel > 2)
+    llvm::outs() << getLocVarStr(Out) << "\n";
+    //for (unsigned K = 0, J = 1; J < E.second.size(); ++K; ++J;) {
+    //}
+  }
 
   return Ret;
 }

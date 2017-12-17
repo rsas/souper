@@ -236,6 +236,7 @@ private:
   /// or to a component's output
   Inst *getComponentInputConstraint(InstContext &IC);
   Inst *getComponentInputConstraint2(InstContext &IC);
+  Inst *getComponentInputConstraint3(InstContext &IC);
 
   /// Output must be wired to either a component's output or input(s)
   Inst *getComponentOutputConstraint(InstContext &IC);
