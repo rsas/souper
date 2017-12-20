@@ -151,6 +151,28 @@ public:
       std::vector<Inst *> Guesses;
       std::set<Inst *> Visited;
       findVars(LHS, Visited, Guesses, LHS->Width);
+
+      Inst *Ante = IC.getConst(APInt(1, true));
+      for (auto I : Guesses) {
+        if (LHS == I)
+          continue;
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
+        Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
+      }
+      InstMapping Mapping(Ante, IC.getConst(APInt(1, true)));
+      std::string Query = BuildQuery(BPCs, PCs, Mapping, 0, /*Negate=*/true);
+      if (Query.empty())
+        return std::make_error_code(std::errc::value_too_large);
+      bool IsSat;
+      EC = SMTSolver->isSatisfiable(Query, IsSat, 0, 0, Timeout);
+      if (EC)
+        return EC;
+      if (IsSat) {
+        Guesses.clear();
+        RHS = 0;
+        return EC;
+      }
+
       for (auto I : Guesses) {
         if (LHS == I)
           continue;
