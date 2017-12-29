@@ -174,6 +174,8 @@ private:
   /// A mapping from a location variable to a concrete component instance,
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
+  /// Components' operand locations
+  std::vector<std::vector<LocVar>> CompOpLocVars;
   /// Location variable's width (increase for support of >256 comps+inputs)
   const unsigned LocInstWidth = 8;
   /// A mapping from a location variable's string representation to its location.
@@ -232,6 +234,9 @@ private:
   /// Each component's input should be wired either to an input
   /// or to a component's output
   Inst *getComponentInputConstraint(InstContext &IC);
+
+  /// Each component's inputs shall not be constants only
+  Inst *getComponentConstInputConstraint(InstContext &IC);
 
   /// Output must be wired to either a component's output or input(s)
   Inst *getComponentOutputConstraint(InstContext &IC);
@@ -292,6 +297,7 @@ private:
   std::vector<LocVar> getOpLocs(const LocVar &Loc);
   std::vector<std::string> splitString(const char *S, char Del=',');
   bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
+  bool isInputConst(const LocVar &Loc);
   void forbidInvalidCandWiring(const ProgramWiring &CandWiring,
                                std::vector<InstMapping> &LoopPCs,
                                std::vector<InstMapping> &WiringPCs,
