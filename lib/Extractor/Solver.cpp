@@ -69,20 +69,25 @@ class BaseSolver : public Solver {
       findVars(Op, Visited, Guesses, Width);
   }
 
-  Inst *getInstCopy(Inst *I, InstContext &IC) {
+  Inst *getInstCopy(Inst *I, InstContext &IC,
+                    std::map<Inst *, Inst *> &Replacements) {
     std::vector<Inst *> Ops;
     for (auto const &Op : I->Ops)
-      Ops.push_back(getInstCopy(Op, IC));
+      Ops.push_back(getInstCopy(Op, IC, Replacements));
 
     if (I->K == Inst::Var) {
-      return IC.createVar(I->Width, "copy");
-    } else if (I->K == Inst::Phi) {
+      if (!Replacements.count(I)) {
+        Inst *Copy = IC.createVar(I->Width, "copy");
+        Replacements[I] = Copy;
+        return Copy;
+      } else
+        return Replacements.at(I);
+    } else if (I->K == Inst::Phi)
       return IC.getPhi(I->B, Ops);
-    } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
+    else if (I->K == Inst::Const || I->K == Inst::UntypedConst)
       return I;
-    } else {
+    else
       return IC.getInst(I->K, I->Width, Ops);
-    }
   }
 
 public:
@@ -175,8 +180,12 @@ public:
         Inst *Ne;
         if (I->K == Inst::Var)
           Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
-        else
-          Ne = IC.getInst(Inst::Ne, 1, {LHS, getInstCopy(I, IC)});
+        else {
+          // separate sub-expressions by copying vars
+          std::map<Inst *, Inst *> Replacements;
+          Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, Replacements),
+                                        getInstCopy(I, IC, Replacements)});
+        }
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
