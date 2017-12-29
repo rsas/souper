@@ -69,6 +69,22 @@ class BaseSolver : public Solver {
       findVars(Op, Visited, Guesses, Width);
   }
 
+  Inst *getInstCopy(Inst *I, InstContext &IC) {
+    std::vector<Inst *> Ops;
+    for (auto const &Op : I->Ops)
+      Ops.push_back(getInstCopy(Op, IC));
+
+    if (I->K == Inst::Var) {
+      return IC.createVar(I->Width, "copy");
+    } else if (I->K == Inst::Phi) {
+      return IC.getPhi(I->B, Ops);
+    } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
+      return I;
+    } else {
+      return IC.getInst(I->K, I->Width, Ops);
+    }
+  }
+
 public:
   BaseSolver(std::unique_ptr<SMTLIBSolver> SMTSolver, unsigned Timeout)
       : SMTSolver(std::move(SMTSolver)), Timeout(Timeout) {}
@@ -156,7 +172,11 @@ public:
       for (auto I : Guesses) {
         if (LHS == I)
           continue;
-        Inst *Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
+        Inst *Ne;
+        if (I->K == Inst::Var)
+          Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
+        else
+          Ne = IC.getInst(Inst::Ne, 1, {LHS, getInstCopy(I, IC)});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
