@@ -1,0 +1,9 @@
+; REQUIRES: solver
+; RUN: %souper-check -infer-rhs -souper-infer-nop %solver %s | FileCheck %s
+; CHECK: result %a
+
+%a:i32 = var
+%b:i32 = var
+%0 = add %a, %b
+%1 = sub %0, %b
+infer %1

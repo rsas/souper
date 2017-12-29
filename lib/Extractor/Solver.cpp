@@ -167,11 +167,8 @@ public:
       EC = SMTSolver->isSatisfiable(Query, IsSat, 0, 0, Timeout);
       if (EC)
         return EC;
-      if (IsSat) {
+      if (IsSat)
         Guesses.clear();
-        RHS = 0;
-        return EC;
-      }
 
       for (auto I : Guesses) {
         if (LHS == I)
@@ -189,6 +186,9 @@ public:
           return EC;
         }
       }
+
+      if (Guesses.size())
+        report_fatal_error("query indicated a nop, but none was found");
     }
 
     if (InferInsts && SMTSolver->supportsModels()) {
