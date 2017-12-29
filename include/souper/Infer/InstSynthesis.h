@@ -231,10 +231,10 @@ private:
 
   /// Each component's input should be wired either to an input
   /// or to a component's output
-  Inst *getInputDefinednessConstraint(InstContext &IC);
+  Inst *getComponentInputConstraint(InstContext &IC);
 
   /// Output must be wired to either a component's output or input(s)
-  Inst *getOutputDefinednessConstraint(InstContext &IC);
+  Inst *getComponentOutputConstraint(InstContext &IC);
 
   /// phi_conn := Forall x,y \in P \cup R \cup I \cup {O}: (l_x = l_y) => x = y.
   /// Given an interconnection among components specified by values of location
@@ -280,9 +280,9 @@ private:
   /// The result is either an input, a constant, or a component output
   LocVar getWiringLocVar(const LocVar &Loc, const LineLocVarMap &LineWiring);
 
-  /// Create a junk-free inst. E.g., return %0 if inst is of type and %0, %0
-  Inst *createJunkFreeInst(Inst::Kind Kind, unsigned Width,
-                           std::vector<Inst *> &Ops, InstContext &IC);
+  /// Create a clean Inst. E.g., return %0 if Inst is of type and %0, %0
+  Inst *createCleanInst(Inst::Kind Kind, unsigned Width,
+                        std::vector<Inst *> &Ops, InstContext &IC);
 
   /// Helper functions
   void filterFixedWidthIntrinsicComps();

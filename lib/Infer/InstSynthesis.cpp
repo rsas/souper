@@ -102,8 +102,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getConsistencyConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getAcyclicityConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
-  WiringPCs.emplace_back(getInputDefinednessConstraint(IC), TrueConst);
-  WiringPCs.emplace_back(getOutputDefinednessConstraint(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint(IC);
@@ -741,11 +741,11 @@ Inst *InstSynthesis::getConnectivityConstraint(InstContext &IC) {
   return Ret;
 }
 
-Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
+Inst *InstSynthesis::getComponentInputConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, true));
 
   if (DebugLevel > 2)
-    llvm::outs() << "input-definedness constraints:\n";
+    llvm::outs() << "component-input constraints:\n";
   for (auto const &L_x : P) {
     Inst *Ante = IC.getConst(APInt(1, false));
     // Inputs
@@ -774,18 +774,19 @@ Inst *InstSynthesis::getInputDefinednessConstraint(InstContext &IC) {
     if (DebugLevel > 2)
       llvm::outs() << "false\n";
     if (Ante == IC.getConst(APInt(1, false)))
-      report_fatal_error("no input-definedness for " + getLocVarStr(L_x.first));
+      report_fatal_error("no input available for " + getLocVarStr(L_x.first));
     Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
   }
 
   return Ret;
 }
 
-Inst *InstSynthesis::getOutputDefinednessConstraint(InstContext &IC) {
+
+Inst *InstSynthesis::getComponentOutputConstraint(InstContext &IC) {
   Inst *Ret = IC.getConst(APInt(1, false));
 
   if (DebugLevel > 2)
-    llvm::outs() << "output-definedness constraints:\n";
+    llvm::outs() << "component output constraints:\n";
   // Inputs
   for (auto const &In : I) {
     if (isWiringInvalid(In.first, O.first))
@@ -940,12 +941,12 @@ Inst *InstSynthesis::createInstFromWiring(
          Comp.Width == LHS->Width);
   if (Comp.Kind == Inst::Select) {
     Ops[0] = IC.getInst(Inst::Trunc, 1, {Ops[0]});
-    return createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
+    return createCleanInst(Comp.Kind, Comp.Width, Ops, IC);
   } if (Comp.Width < DefaultWidth && Comp.Kind != Inst::Trunc) {
-    Inst *Ret = createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
+    Inst *Ret = createCleanInst(Comp.Kind, Comp.Width, Ops, IC);
     return IC.getInst(Inst::ZExt, DefaultWidth, {Ret});
   } else
-    return createJunkFreeInst(Comp.Kind, Comp.Width, Ops, IC);
+    return createCleanInst(Comp.Kind, Comp.Width, Ops, IC);
 }
 
 LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
@@ -1039,9 +1040,9 @@ LocVar InstSynthesis::getWiringLocVar(const LocVar &OpLoc,
   return Match;
 }
 
-Inst *InstSynthesis::createJunkFreeInst(Inst::Kind Kind, unsigned Width,
-                                        std::vector<Inst *> &Ops,
-                                        InstContext &IC) {
+Inst *InstSynthesis::createCleanInst(Inst::Kind Kind, unsigned Width,
+                                     std::vector<Inst *> &Ops,
+                                     InstContext &IC) {
   switch (Kind) {
   case Inst::Add:
   case Inst::AddNSW:
