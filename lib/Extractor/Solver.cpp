@@ -159,6 +159,7 @@ public:
         Inst *Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
+      // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
       InstMapping Mapping(Ante, IC.getConst(APInt(1, true)));
       std::string Query = BuildQuery(BPCs, PCs, Mapping, 0, /*Negate=*/true);
       if (Query.empty())
@@ -168,8 +169,9 @@ public:
       if (EC)
         return EC;
       if (IsSat)
-        Guesses.clear();
+        Guesses.clear(); // no nop
 
+      // find the nop
       for (auto I : Guesses) {
         if (LHS == I)
           continue;
