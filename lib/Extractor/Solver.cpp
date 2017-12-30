@@ -69,6 +69,26 @@ class BaseSolver : public Solver {
       findVars(Op, Visited, Guesses, Width);
   }
 
+  void findCands(Inst *I, std::set<Inst *> &Visited,
+                 std::vector<Inst *> &Guesses, unsigned Width,
+                 unsigned Benefit) {
+    if (!Visited.insert(I).second)
+      return;
+    if (Benefit > 0 && I->Width == Width) {
+      if (I->K != souper::Inst::Const &&
+          I->K != souper::Inst::UntypedConst) {
+        Guesses.emplace_back(I);
+        if (Benefit > 1) {
+          // TODO synthesize negate, complement, ...
+        }
+      }
+    }
+    if (I->K != Inst::Phi)
+      ++Benefit;
+    for (auto Op : I->Ops)
+      findCands(Op, Visited, Guesses, Width, Benefit);
+  }
+
   Inst *getInstCopy(Inst *I, InstContext &IC,
                     std::map<Inst *, Inst *> &Replacements) {
     std::vector<Inst *> Ops;
@@ -171,7 +191,7 @@ public:
     if (InferNop) {
       std::vector<Inst *> Guesses;
       std::set<Inst *> Visited;
-      findVars(LHS, Visited, Guesses, LHS->Width);
+      findCands(LHS, Visited, Guesses, LHS->Width, 0);
 
       Inst *Ante = IC.getConst(APInt(1, true));
       for (auto I : Guesses) {
