@@ -104,6 +104,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
   WiringPCs.emplace_back(getComponentConstInputConstraint(IC), TrueConst);
+  WiringPCs.emplace_back(getComponentInputSymmetryConstraint(IC), TrueConst);
+  exit(1);
   WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
@@ -205,6 +207,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         llvm::outs() << "candidate:\n";
         PrintReplacementRHS(llvm::outs(), Cand, Context);
       }
+
+      if (!CandSeen.insert(Cand).second)
+        report_fatal_error("synthesis bug: candidate has been seen already");
 
       // The synthesis loop assumes that each component has a cost of one.
       // However, this is not the case for all components (e.g., bswap).
@@ -853,6 +858,73 @@ Inst *InstSynthesis::getComponentConstInputConstraint(InstContext &IC) {
       llvm::outs() << "false\n";
     Inst *Ne = IC.getInst(Inst::Eq, 1, {CompAnte, IC.getConst(APInt(1, false))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
+  }
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getComponentInputSymmetryConstraint(InstContext &IC) {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component input symmetry constraints:\n";
+
+  const std::set<Inst::Kind> SymmetricComps = {
+    Inst::Add, Inst::Mul, Inst::And, Inst::Or, Inst::Xor,
+    Inst::Eq, Inst::Ne,
+    Inst::AddNSW, Inst::AddNUW, Inst::AddNW,
+    Inst::MulNSW, Inst::MulNUW, Inst::MulNW,
+  };
+
+  for (auto const &E : CompOpLocVars) {
+    LocVar OutLocVar = std::make_pair(E[0].first, 0);
+    Inst *OutInst = CompInstMap[OutLocVar];
+    if (!SymmetricComps.count(OutInst->K))
+      continue;
+    assert(OutInst->Ops.size() == 2);
+    assert(E.size() == 2);
+    // Iterate over matching inputs and outputs and collect candidates
+    std::vector<LocInst> Cands;
+    // Inputs and constants
+    for (auto const &In : I) {
+      if (isWiringInvalid(E[0], In.first) || isWiringInvalid(E[1], In.first))
+        continue;
+      Cands.push_back(In);
+    }
+    // Component outputs
+    for (auto const &L_y : R) {
+      // Don't constrain yourself
+      if (OutLocVar.first == L_y.first.first)
+        continue;
+      if (isWiringInvalid(E[0], L_y.first) || isWiringInvalid(E[1], L_y.first))
+        continue;
+      Cands.push_back(L_y);
+    }
+    if (DebugLevel > 2) {
+       llvm::outs() << "component " << getLocVarStr(OutLocVar) << " has "
+                    << Cands.size() << " candidate(s):\n";
+       std::string space;
+       for (const auto &C : Cands) {
+         llvm::outs() << space << getLocVarStr(C.first);
+         space = " ";
+       }
+       llvm::outs() << "\n";
+    }
+    // Iterate over potential candidate input pairs
+    if (DebugLevel > 3)
+      llvm::outs() << "candidate input pairs:\n";
+    for (unsigned J = 0; J < Cands.size()-1; ++J) {
+      for (unsigned K = J+1; K < Cands.size(); ++K) {
+        if (isInputConst(Cands[J].first) &&
+            isInputConst(Cands[K].first))
+          continue;
+        if (DebugLevel > 3) {
+          llvm::outs() << getLocVarStr(Cands[J].first) << " "
+                       << getLocVarStr(Cands[K].first) << "\n";
+        }
+        // TOOD: add constraints here ...
+      }
+    }
   }
 
   return Ret;

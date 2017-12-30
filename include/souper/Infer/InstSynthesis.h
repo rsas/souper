@@ -183,6 +183,8 @@ private:
   std::map<std::string, LocInst> LocInstMap;
   /// Invalid wirings
   std::set<std::pair<LocVar, LocVar>> InvalidWirings;
+  /// Seen candidates for duplicate detection
+  std::set<Inst *> CandSeen;
 
   /// Initialize components to be used during synthesis
   void setCompLibrary();
@@ -237,6 +239,9 @@ private:
 
   /// Each component's inputs shall not be constants only
   Inst *getComponentConstInputConstraint(InstContext &IC);
+
+  /// Component candidates shall be unique
+  Inst *getComponentInputSymmetryConstraint(InstContext &IC);
 
   /// Output must be wired to either a component's output or input(s)
   Inst *getComponentOutputConstraint(InstContext &IC);
