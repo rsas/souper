@@ -177,15 +177,10 @@ public:
       for (auto I : Guesses) {
         if (LHS == I)
           continue;
-        Inst *Ne;
-        if (I->K == Inst::Var)
-          Ne = IC.getInst(Inst::Ne, 1, {LHS, I});
-        else {
-          // separate sub-expressions by copying vars
-          std::map<Inst *, Inst *> Replacements;
-          Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, Replacements),
-                                        getInstCopy(I, IC, Replacements)});
-        }
+        // separate sub-expressions by copying vars
+        std::map<Inst *, Inst *> Replacements;
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, Replacements),
+                                            getInstCopy(I, IC, Replacements)});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
