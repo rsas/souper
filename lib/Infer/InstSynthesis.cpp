@@ -911,6 +911,7 @@ Inst *InstSynthesis::getComponentInputSymmetryConstraint(InstContext &IC) {
        llvm::outs() << "\n";
     }
     // Iterate over potential candidate input pairs
+    Inst *CompAnte = TrueConst;
     if (DebugLevel > 3)
       llvm::outs() << "candidate input pairs:\n";
     for (unsigned J = 0; J < Cands.size()-1; ++J) {
@@ -925,6 +926,8 @@ Inst *InstSynthesis::getComponentInputSymmetryConstraint(InstContext &IC) {
         // TOOD: add constraints here ...
       }
     }
+    Inst *Eq = IC.getInst(Inst::Eq, 1, {CompAnte, TrueConst});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Eq});
   }
 
   return Ret;
