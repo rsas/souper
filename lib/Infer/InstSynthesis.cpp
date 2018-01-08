@@ -923,21 +923,23 @@ Inst *InstSynthesis::getComponentInputSymmetryConstraint(InstContext &IC) {
           llvm::outs() << getLocVarStr(Cands[J].first) << " "
                        << getLocVarStr(Cands[K].first) << "\n";
         }
-        auto LocVarStrLeft = getLocVarStr(Cands[J].first, LOC_PREFIX);
-        auto LocVarStrRight = getLocVarStr(Cands[K].first, LOC_PREFIX);
+        auto LocVarStrLeft = getLocVarStr(E[0], LOC_PREFIX);
+        auto LocVarStrRight = getLocVarStr(E[1], LOC_PREFIX);
+        Inst *FirstOp = LocInstMap[LocVarStrLeft].second;
+        Inst *SecondOp = LocInstMap[LocVarStrRight].second;
         // TOOD: add constraints here ...
-        Inst *Eq1 = IC.getInst(Inst::Eq, 1, {E[0].second, Cands[J].second});
-        Inst *Eq2 = IC.getInst(Inst::Eq, 1, {E[1].second, Cands[K].second});
+        Inst *Eq1 = IC.getInst(Inst::Eq, 1, {FirstOp, Cands[J].second});
+        Inst *Eq2 = IC.getInst(Inst::Eq, 1, {SecondOp, Cands[K].second});
         Inst *And1 = IC.getInst(Inst::And, 1, {Eq1, Eq2});
         Inst *And11 = IC.getInst(Inst::Eq, 1, {And1, TrueConst});
-        Inst *Ne1 = IC.getInst(Inst::Ne, 1, {E[0].second, Cands[K].second});
-        Inst *Ne2 = IC.getInst(Inst::Ne, 1, {E[1].second, Cands[J].second});
+        Inst *Ne1 = IC.getInst(Inst::Ne, 1, {FirstOp, Cands[K].second});
+        Inst *Ne2 = IC.getInst(Inst::Ne, 1, {SecondOp, Cands[J].second});
         Inst *And2 = IC.getInst(Inst::And, 1, {Ne1, Ne2});
         Inst *And22 = IC.getInst(Inst::Eq, 1, {And2, TrueConst});
 
-        //Inst *Ante = IC.getInst(Inst::Select, 1, {And1, And2, TrueConst});
+        Inst *Ante = IC.getInst(Inst::Select, 1, {And1, And2, TrueConst});
         //Inst *Ante = IC.getInst(Inst::Select, 1, {And11, And22, TrueConst});
-        //CompAnte = IC.getInst(Inst::And, 1, {CompAnte, Ante});
+        CompAnte = IC.getInst(Inst::And, 1, {CompAnte, Ante});
       }
     }
     Inst *Eq = IC.getInst(Inst::Eq, 1, {CompAnte, TrueConst});
