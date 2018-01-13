@@ -208,8 +208,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         PrintReplacementRHS(llvm::outs(), Cand, Context);
       }
 
-      if (!CandSeen.insert(Cand).second)
-        report_fatal_error("synthesis bug: candidate has been seen already");
+      //if (!CandSeen.insert(Cand).second)
+      //  report_fatal_error("synthesis bug: candidate has been seen already");
 
       // The synthesis loop assumes that each component has a cost of one.
       // However, this is not the case for all components (e.g., bswap).
@@ -936,8 +936,10 @@ Inst *InstSynthesis::getComponentInputSymmetryConstraint(InstContext &IC) {
         Inst *Ne2 = IC.getInst(Inst::Ne, 1, {SecondOp, Cands[J].second});
         Inst *And2 = IC.getInst(Inst::And, 1, {Ne1, Ne2});
         Inst *And22 = IC.getInst(Inst::Eq, 1, {And2, TrueConst});
+        Inst *Or1 = IC.getInst(Inst::Or, 1, {Ne1, Ne2});
 
-        Inst *Ante = IC.getInst(Inst::Select, 1, {And1, And2, TrueConst});
+        Inst *Ante = IC.getInst(Inst::Or, 1, {And1, Or1});
+        //Inst *Ante = IC.getInst(Inst::Select, 1, {And1, And2, TrueConst});
         //Inst *Ante = IC.getInst(Inst::Select, 1, {And11, And22, TrueConst});
         CompAnte = IC.getInst(Inst::And, 1, {CompAnte, Ante});
       }
