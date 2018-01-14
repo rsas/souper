@@ -183,6 +183,8 @@ private:
   std::map<std::string, LocInst> LocInstMap;
   /// Invalid wirings
   std::set<std::pair<LocVar, LocVar>> InvalidWirings;
+  /// Seen candidates for duplicate detection
+  std::set<Inst *> CandSeen;
 
   /// Initialize components to be used during synthesis
   void setCompLibrary();
@@ -211,6 +213,12 @@ private:
   /// simply skipped during connectivity constraint creation
   void setInvalidWirings();
 
+  /// Mimic of Distinct function in SMT-LIB
+  Inst *getDistinctConstraint(InstContext &IC,
+                              const std::vector<LocInst> &Left,
+                              const std::vector<LocInst> &Right,
+                              const std::string &Desc = "");
+
   /// Every line in the program has at most one component.
   /// Don't wire semantically invalid variable locations,
   /// e.g., a component's output to its inputs
@@ -227,6 +235,7 @@ private:
   /// phi_P: Forall x in P \cup I: 0 <= l_x <= M-1
   /// phi_R: Forall x in R: |N| <= l_x <= M-1
   Inst *getLocVarConstraint(InstContext &IC);
+  Inst *getLocVarConstraint2(InstContext &IC);
 
   /// Begin <= O < End
   Inst *getOutputLocVarConstraint(int Begin, int End, InstContext &IC);
@@ -246,6 +255,7 @@ private:
   /// variables L, we can relate the input/output variables of the components
   /// and the program
   Inst *getConnectivityConstraint(InstContext &IC);
+  Inst *getConnectivityConstraint2(InstContext &IC);
 
   /// Create a copy of instruction I replacing its input vars with vars
   /// in Replacements
@@ -295,6 +305,7 @@ private:
   std::string getLocVarStr(const LocVar &Loc, const std::string Prefix="");
   LocVar getLocVarFromStr(const std::string &Str);
   std::vector<LocVar> getOpLocs(const LocVar &Loc);
+  LocInst getCompOutLocInst(const LocInst &CompIn);
   std::vector<std::string> splitString(const char *S, char Del=',');
   bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
   bool isInputConst(const LocVar &Loc);
