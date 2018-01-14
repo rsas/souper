@@ -48,6 +48,7 @@ static cl::opt<unsigned> MaxWiringAttempts("souper-synthesis-wiring-iterations",
 namespace souper {
 
 static const std::string INPUT_PREFIX = "in_";
+static const std::string OUTPUT_PREFIX = "out_";
 static const std::string LOC_PREFIX = "loc_";
 static const std::string LOC_SEP = "_";
 static const std::string COMP_INPUT_PREFIX = "compin_";
@@ -80,7 +81,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   initOutput(IC);
   initComponents(IC);
   initConstComponents(IC);
-  //initLocations();
+  initLocations();
 
   N = I.size();
   M = Comps.size() + N;
@@ -281,13 +282,19 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                      << "(#cex: "<< S.size()+1 << ", "
                      << "refinement: " << Refinements << ")\n";
       // Parse input counterexamples from the model
-      std::map<Inst *, Inst *> InputMap;
+      std::map<Inst *, Inst *> ValueMap;
       for (unsigned J = 0; J < ModelInsts.size(); ++J) {
         auto Name = ModelInsts[J]->Name;
+        llvm::outs() << "counterexample: " << Name << " = " << ModelVals[J] << "\n";
         if (Name.find(INPUT_PREFIX) != std::string::npos) {
           auto In = ModelInsts[J];
           auto Val = ModelVals[J];
-          InputMap[In] = IC.getConst(Val);
+          ValueMap[In] = IC.getConst(Val);
+          if (DebugLevel > 2)
+            llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
+        } else if (Name.find(OUTPUT_PREFIX) != std::string::npos) {
+          auto Val = ModelVals[J];
+          ValueMap[CompInstMap[O.first]] = IC.getConst(Val);
           if (DebugLevel > 2)
             llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
         }
@@ -295,13 +302,15 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       // Counterexamples should be unique in each iteration
       bool CexExists = false;
       for (auto const &E : S)
-        if (std::equal(E.begin(), E.end(), InputMap.begin())) {
+        if (std::equal(E.begin(), E.end(), ValueMap.begin())) {
           CexExists = true;
           break;
         }
       // Add counterexamples to S
       if (!CexExists)
-        S.push_back(InputMap);
+        S.push_back(ValueMap);
+      else
+        report_fatal_error("counter-examples are not unique!");
 
       // Constants are not constrained by the inputs, thus, we must explicitly
       // constrain the not-working cand wiring incl. the constants and forbid
@@ -523,7 +532,9 @@ void InstSynthesis::initOutput(InstContext &IC) {
   O = std::make_pair(Out, Loc);
   LocInstMap[LocVarStr] = O;
   // Update CompInstMap map with concrete Inst
-  CompInstMap[Out] = LHS;
+  LocVarStr = getLocVarStr(Out, OUTPUT_PREFIX);
+  CompInstMap[Out] = IC.createVar(LHS->Width, LocVarStr);
+  //CompInstMap[Out] = LHS;
 }
 
 void InstSynthesis::initLocations() {
@@ -1032,7 +1043,10 @@ Inst *InstSynthesis::getInstCopy(Inst *I, InstContext &IC,
   } else if (I->K == Inst::Phi) {
     return IC.getPhi(I->B, Ops);
   } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
-    return I;
+    if (!Replacements.count(I))
+      return I;
+    // Replace
+    return Replacements.at(I);
   } else {
     return IC.getInst(I->K, I->Width, Ops);
   }
@@ -1051,8 +1065,8 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << E.first << "\t";
       for (auto const &Loc : E.second)
         llvm::outs() << getLocVarStr(Loc) << " ";
-      if (E.second.size() != 1)
-        report_fatal_error("synthesis bug: more than one component on one line");
+      if (E.second.size() > 3)
+        report_fatal_error("synthesis bug: more than three components on one line");
       llvm::outs() << "\n";
     }
   }
@@ -1520,7 +1534,7 @@ bool InstSynthesis::hasConst(Inst *I) {
 }
 
 std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Inst *, Inst *>> &S,
-                                         unsigned NumInputs) {
+                                                        unsigned NumInputs) {
   std::error_code EC;
 
   auto InputPCs = *LPCs;
@@ -1542,17 +1556,19 @@ std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Ins
     if (!IsSat)
       break;
 
-    std::map<Inst *, Inst *> ConcreteInputs;
+    std::map<Inst *, Inst *> ConcreteValues;
     for (unsigned K = 0; K < ModelInsts.size(); ++K) {
       auto Name = ModelInsts[K]->Name;
       if (Name.find(INPUT_PREFIX) != std::string::npos) {
         auto Input = ModelInsts[K];
-        ConcreteInputs[Input] = LIC->getConst(ModelVals[K]);
+        ConcreteValues[Input] = LIC->getConst(ModelVals[K]);
         Inst *Ne = LIC->getInst(Inst::Ne, 1, {Input, LIC->getConst(ModelVals[K])});
         InputPCs.emplace_back(Ne, TrueConst);
+      } else if (Name.find("output") != std::string::npos) {
+        ConcreteValues[CompInstMap[O.first]] = LIC->getConst(ModelVals[K]);
       }
     }
-    S.push_back(ConcreteInputs);
+    S.push_back(ConcreteValues);
   }
 
   return EC;
@@ -1562,13 +1578,13 @@ Inst *InstSynthesis::initConcreteInputWirings(Inst *Query, Inst *WiringQuery,
                                               unsigned Refinements,
                                               std::vector<std::map<Inst *, Inst *>> &S) {
   for (unsigned K = 0; K < S.size(); ++K) {
-    auto InputMap = S[K];
+    auto &ValueMap = S[K];
     if (DebugLevel > 2) {
-      for (auto const &Input : InputMap) {
-        if (Input.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
+      for (auto const &Value : ValueMap) {
+        if (Value.first->Name.find(COMP_INPUT_PREFIX) != std::string::npos)
           continue;
-        llvm::outs() << "setting input " << Input.first->Name
-                     << " to " << Input.second->Val << "\n";
+        llvm::outs() << "setting " << Value.first->Name
+                     << " to " << Value.second->Val << "\n";
       }
     }
     if (K > 0) {
@@ -1578,11 +1594,11 @@ Inst *InstSynthesis::initConcreteInputWirings(Inst *Query, Inst *WiringQuery,
         if (E.first.find(COMP_INPUT_PREFIX) != std::string::npos) {
           auto In = E.second.second;
           std::string Name = E.first + LOC_SEP + std::to_string(Refinements);
-          InputMap[In] = LIC->createVar(In->Width, Name);
+          ValueMap[In] = LIC->createVar(In->Width, Name);
         }
       }
     }
-    Inst *Copy = getInstCopy(WiringQuery, *LIC, InputMap);
+    Inst *Copy = getInstCopy(WiringQuery, *LIC, ValueMap);
     Query = LIC->getInst(Inst::And, 1, {Query, Copy});
     Query->DemandedBits = APInt::getAllOnesValue(Query->Width);
   }
