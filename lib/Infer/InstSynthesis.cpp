@@ -125,7 +125,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint2(IC);
   //Inst *WiringQuery = getConnectivityConstraint(IC);
-  return EC;
 
   // Initial concrete input set S.
   // With every new input set that proves a synthesised program is invalid,
@@ -135,7 +134,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Ask the solver for four initial concrete inputs.
   // The number 4 was derived experimentally giving a good overall speed-up
   // for both small and big synthesis queries
-  EC = getInitialConcreteInputs(S, 4);
+  //EC = getInitialConcreteInputs(S, 4);
+  EC = getInitialConcreteInputs(S, 1);
   if (EC)
     return EC;
 
@@ -163,7 +163,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     Inst *CompConstraint;
     if (DebugLevel > 1)
       llvm::outs() << "synthesizing using " << J << " component(s)\n";
-    // If synthesis using 0 components failed (aka nop synthesis),
+    // If synthesis using 0 components failed (aka nop/constant synthesis),
     // don't subsequently wire the output to the input(s)
     if (J == 0)
       CompConstraint = getOutputLocVarConstraint(0, N, IC);
@@ -885,6 +885,22 @@ Inst *InstSynthesis::getConnectivityConstraint2(InstContext &IC) {
       Ret = IC.getInst(Inst::And, 1, {Ret, Implies});
     }
   }
+  // output -> inputs and component outputs
+  std::vector<LocInst> Tmp(I.begin(), I.end());
+  Tmp.insert(Tmp.end(), R.begin(), R.end());
+  for (auto const &L_y : Tmp) {
+    auto const &X = CompInstMap[O.first];
+    auto const &Y = CompInstMap[L_y.first];
+    if (DebugLevel > 3)
+      llvm::outs() << getLocVarStr(O.first) << " == "
+                   << getLocVarStr(L_y.first) << "\n";
+    // (l_x == l_y) => x == y
+    Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, L_y.second});
+    Eq = IC.getInst(Inst::Eq, 1, {Eq, FalseConst});
+    Inst *Eq2 = IC.getInst(Inst::Eq, 1, {X, Y});
+    Inst *Implies = IC.getInst(Inst::Or, 1, {Eq, Eq2});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Implies});
+  }
 
   return Ret;
 }
@@ -1035,6 +1051,8 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << E.first << "\t";
       for (auto const &Loc : E.second)
         llvm::outs() << getLocVarStr(Loc) << " ";
+      if (E.second.size() != 1)
+        report_fatal_error("synthesis bug: more than one component on one line");
       llvm::outs() << "\n";
     }
   }
