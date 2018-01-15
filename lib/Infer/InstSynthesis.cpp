@@ -102,17 +102,21 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   std::vector<InstMapping> WiringPCs;
 
   // Add synthesis constraints as path conditions
-  // - Distinct constraints
+  // - Distinct constraints for locations
   // 1) Distinct(components' outputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, R, R, "outputs"), TrueConst);
-  // 2) Distinct(inputs, components' outputs)
+  // 2) Distinct(inputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, I, I,
                                                "inputs"), TrueConst);
+  // 3) Distinct(inputs, components' outputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, I, R,
                                                "inputs, outputs"), TrueConst);
-  // 3) Distinct(components' inputs)
+  // 4) Distinct(components' inputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, P, P,
                                                "component inputs"), TrueConst);
+  // 5) Distinct(components' inputs, output)
+  //WiringPCs.emplace_back(getDistinctConstraint(IC, P, std::vector<LocInst>{O},
+  //                                             "component inputs, output"), TrueConst);
   // - Acyclicity constraint
   WiringPCs.emplace_back(getAcyclicityConstraint(IC), TrueConst);
   // - Location constraints of inputs, constants, components' inputs and outputs
