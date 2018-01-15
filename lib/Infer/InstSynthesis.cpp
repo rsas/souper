@@ -106,6 +106,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // 1) Distinct(components' outputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, R, R, "outputs"), TrueConst);
   // 2) Distinct(inputs, components' outputs)
+  WiringPCs.emplace_back(getDistinctConstraint(IC, I, I,
+                                               "inputs"), TrueConst);
   WiringPCs.emplace_back(getDistinctConstraint(IC, I, R,
                                                "inputs, outputs"), TrueConst);
   // 3) Distinct(components' inputs)
@@ -179,6 +181,10 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // --------------------------------------------------------------------------
     unsigned Refinements = 0;
     while (true) {
+      if (DebugLevel > 3)
+        llvm::outs() << "++++++++++++++++++++ "
+                     << "Components #" << J << ", Refinement #" << Refinements
+                     << " ++++++++++++++++++++\n";
       Inst *Query = TrueConst;
       // Put each set of concrete inputs into a separate copy of the WiringQuery
       // Solve the synthesis constraint.
@@ -285,32 +291,32 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       std::map<Inst *, Inst *> ValueMap;
       for (unsigned J = 0; J < ModelInsts.size(); ++J) {
         auto Name = ModelInsts[J]->Name;
-        llvm::outs() << "counterexample: " << Name << " = " << ModelVals[J] << "\n";
         if (Name.find(INPUT_PREFIX) != std::string::npos) {
           auto In = ModelInsts[J];
           auto Val = ModelVals[J];
           ValueMap[In] = IC.getConst(Val);
           if (DebugLevel > 2)
             llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
-        } else if (Name.find(OUTPUT_PREFIX) != std::string::npos) {
-          auto Val = ModelVals[J];
-          ValueMap[CompInstMap[O.first]] = IC.getConst(Val);
-          if (DebugLevel > 2)
-            llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
         }
       }
-      // Counterexamples should be unique in each iteration
-      bool CexExists = false;
+      
+      // We need to get the concrete LHS output of the counter-example
+      llvm::APInt Result;
+      EC = getConcreteLHSOutput(ValueMap, Result);
+      if (EC)
+        report_fatal_error("cannot produce output with concrete input");
+      // Update the cex map with LHS output
+      ValueMap[CompInstMap[O.first]] = LIC->getConst(Result);
+      if (DebugLevel > 2)
+        llvm::outs() << "LHS output: " << Result << "\n";
+
+      // Counterexamples must be unique in each iteration
       for (auto const &E : S)
-        if (std::equal(E.begin(), E.end(), ValueMap.begin())) {
-          CexExists = true;
-          break;
-        }
+        if (std::equal(E.begin(), E.end(), ValueMap.begin()))
+          report_fatal_error("counter-examples are not unique!");
+
       // Add counterexamples to S
-      if (!CexExists)
-        S.push_back(ValueMap);
-      else
-        report_fatal_error("counter-examples are not unique!");
+      S.push_back(ValueMap);
 
       // Constants are not constrained by the inputs, thus, we must explicitly
       // constrain the not-working cand wiring incl. the constants and forbid
@@ -321,7 +327,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       } else {
         // Forbid invalid constant-free wirings explicitly in the future,
         // so they don't show up in the wiring result
-        forbidInvalidCandWiring(CandWiring, LoopPCs, WiringPCs, IC);
+        //forbidInvalidCandWiring(CandWiring, LoopPCs, WiringPCs, IC);
       }
     }
   }
@@ -1153,15 +1159,10 @@ Inst *InstSynthesis::createInstFromWiring(
   if (DebugLevel > 3) {
     llvm::outs() << "- creating inst " << Inst::getKindName(Comp.Kind)
                  << ", width " << Comp.Width << "\n";
-    llvm::outs() << "before junk removal:\n";
+    llvm::outs() << "before clean-up:\n";
     PrintReplacementRHS(llvm::outs(), IC.getInst(Comp.Kind, Comp.Width, Ops),
                         Context);
   }
-  // Sanity checks
-  if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
-    report_fatal_error("inst operands are constants!");
-  assert(Comp.Width == 1 || Comp.Width == DefaultWidth ||
-         Comp.Width == LHS->Width);
   // Sanity checks
   if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
     report_fatal_error("inst operands are constants!");
@@ -1569,6 +1570,39 @@ std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Ins
       }
     }
     S.push_back(ConcreteValues);
+  }
+
+  return EC;
+}
+
+
+std::error_code InstSynthesis::getConcreteLHSOutput(const std::map<Inst *, Inst *> &ConcreteInputs,
+                                                    llvm::APInt &Result) {
+
+  std::error_code EC;
+
+  std::vector<Inst *> ModelInsts;
+  std::vector<llvm::APInt> ModelVals;
+  // Do we need to copy BPCs and LPCs here?
+  Inst *Copy = getInstCopy(LHS, *LIC, ConcreteInputs);
+  InstMapping Mapping(Copy, LIC->createVar(LHS->Width, "output"));
+  // Negate the query to get a SAT model
+  std::string QueryStr = BuildQuery(*LBPCs, *LPCs, Mapping,
+                                    &ModelInsts, /*Negate=*/true);
+  if (QueryStr.empty())
+    return std::make_error_code(std::errc::value_too_large);
+  bool IsSat;
+  EC = LSMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                 &ModelVals, LTimeout);
+  if (EC || !IsSat)
+    return EC;
+
+  for (unsigned K = 0; K < ModelInsts.size(); ++K) {
+    auto Name = ModelInsts[K]->Name;
+    if (Name.find("output") != std::string::npos) {
+      Result = ModelVals[K];
+      break;
+    }
   }
 
   return EC;

@@ -318,6 +318,8 @@ private:
   bool hasConst(Inst *I);
   std::error_code getInitialConcreteInputs(std::vector<std::map<Inst *, Inst *>> &S,
                                            unsigned NumInputs);
+  std::error_code getConcreteLHSOutput(const std::map<Inst *, Inst *> &ConcreteInputs,
+                                       llvm::APInt &Result);
   Inst *initConcreteInputWirings(Inst *Query, Inst *WiringQuery,
                                  unsigned Refinements,
                                  std::vector<std::map<Inst *, Inst *>> &S);
