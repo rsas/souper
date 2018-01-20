@@ -84,7 +84,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   initLocations();
 
   N = I.size();
-  M = Comps.size() + N;
+  //M = Comps.size() + N;
+  M = Comps.size() * 3 + N;
+  //M = 100;
   assert(M < (1<<LocInstWidth) && "too many inputs and components");
 
   int LHSCost = cost(LHS);
@@ -105,6 +107,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // - Distinct constraints for locations
   // 1) Distinct(components' outputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, R, R, "outputs"), TrueConst);
+
   // 2) Distinct(inputs)
   WiringPCs.emplace_back(getDistinctConstraint(IC, I, I,
                                                "inputs"), TrueConst);
@@ -115,19 +118,23 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getDistinctConstraint(IC, P, P,
                                                "component inputs"), TrueConst);
   // 5) Distinct(components' inputs, output)
-  //WiringPCs.emplace_back(getDistinctConstraint(IC, P, std::vector<LocInst>{O},
-  //                                             "component inputs, output"), TrueConst);
+  WiringPCs.emplace_back(getDistinctConstraint(IC, P, std::vector<LocInst>{O},
+                                               "component inputs, output"), TrueConst);
+
   // - Acyclicity constraint
   WiringPCs.emplace_back(getAcyclicityConstraint(IC), TrueConst);
+
   // - Location constraints of inputs, constants, components' inputs and outputs
   WiringPCs.emplace_back(getLocVarConstraint2(IC), TrueConst);
+  WiringPCs.emplace_back(getLocVarConstraint3(IC), TrueConst);
 
   // TODO: Remove
   //WiringPCs.emplace_back(getConsistencyConstraint(IC), TrueConst);
   //WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
   //WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
   //WiringPCs.emplace_back(getComponentConstInputConstraint(IC), TrueConst);
-  //WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
+
+  WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
   Inst *WiringQuery = getConnectivityConstraint2(IC);
@@ -169,7 +176,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   for (int J = 0; J <= MaxCompNum; ++J) {
     Inst *CompConstraint;
     if (DebugLevel > 1)
-      llvm::outs() << "synthesizing using " << J << " component(s)\n";
+      llvm::outs() << "++++++++++++++++++++ "
+                   << "synthesizing using " << J << " component(s)"
+                   << " ++++++++++++++++++++\n";
     // If synthesis using 0 components failed (aka nop/constant synthesis),
     // don't subsequently wire the output to the input(s)
     if (J == 0)
@@ -185,10 +194,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // --------------------------------------------------------------------------
     unsigned Refinements = 0;
     while (true) {
-      if (DebugLevel > 3)
-        llvm::outs() << "++++++++++++++++++++ "
-                     << "Components #" << J << ", Refinement #" << Refinements
-                     << " ++++++++++++++++++++\n";
       Inst *Query = TrueConst;
       // Put each set of concrete inputs into a separate copy of the WiringQuery
       // Solve the synthesis constraint.
@@ -721,6 +726,13 @@ Inst *InstSynthesis::getAcyclicityConstraint(InstContext &IC) {
                    << getLocVarStr(L_y.first) << "\n";
     Inst *Ult = IC.getInst(Inst::Ult, 1, {L_x.second, L_y.second});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
+    //
+    Inst *Ult1 = IC.getInst(Inst::Ult, 1, {L_x.second, O.second});
+    Inst *Ult2 = IC.getInst(Inst::Ule, 1, {L_y.second, O.second});
+    Inst *Eq = IC.getInst(Inst::Eq, 1, {Ult1, FalseConst});
+    Inst *Implies = IC.getInst(Inst::Or, 1, {Eq, Ult2});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Implies});
+    //
   }
 
   return Ret;
@@ -806,6 +818,23 @@ Inst *InstSynthesis::getLocVarConstraint2(InstContext &IC) {
 
     Ult = IC.getInst(Inst::Ult, 1,
                      {L_x.second, IC.getConst(APInt(L_x.second->Width, M))});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
+  }
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getLocVarConstraint3(InstContext &IC) {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "location variable constraints for inputs:\n";
+  // All inputs
+  for (auto const &L_x : I) {
+    if (DebugLevel > 2)
+      llvm::outs() << getLocVarStr(L_x.first)
+                   << " < " << getLocVarStr(O.first) << "\n";
+    Inst *Ult = IC.getInst(Inst::Ult, 1, {L_x.second, O.second});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
   }
 
@@ -1075,8 +1104,8 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << E.first << "\t";
       for (auto const &Loc : E.second)
         llvm::outs() << getLocVarStr(Loc) << " ";
-      if (E.second.size() > 3)
-        report_fatal_error("synthesis bug: more than three components on one line");
+      if (E.second.size() > 2)
+        report_fatal_error("synthesis bug: more than two components on one line");
       llvm::outs() << "\n";
     }
   }
@@ -1168,8 +1197,8 @@ Inst *InstSynthesis::createInstFromWiring(
                         Context);
   }
   // Sanity checks
-  if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
-    report_fatal_error("inst operands are constants!");
+  //if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
+  //  report_fatal_error("inst operands are constants!");
   assert(Comp.Width == 1 || Comp.Width == DefaultWidth ||
          Comp.Width == LHS->Width);
   // Create instruction
@@ -1196,6 +1225,8 @@ LocVar InstSynthesis::parseWiringModel(const SolverSolution &Solution,
   assert(ModelVals.size() && "there must models to parse");
   for (unsigned J = 0; J < ModelInsts.size(); ++J) {
     auto Name = ModelInsts[J]->Name;
+    //llvm::outs() << "Name: " << Name << "\n";
+    //llvm::outs() << "Value: " << ModelVals[J].getZExtValue() << "\n";
     // Parse location variable models
     if (Name.find(LOC_PREFIX) != std::string::npos) {
       LocVar Loc = getLocVarFromStr(Name.substr(LOC_PREFIX.size()));

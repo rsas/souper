@@ -236,6 +236,7 @@ private:
   /// phi_R: Forall x in R: |N| <= l_x <= M-1
   Inst *getLocVarConstraint(InstContext &IC);
   Inst *getLocVarConstraint2(InstContext &IC);
+  Inst *getLocVarConstraint3(InstContext &IC);
 
   /// Begin <= O < End
   Inst *getOutputLocVarConstraint(int Begin, int End, InstContext &IC);
