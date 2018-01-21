@@ -115,8 +115,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getDistinctConstraint(IC, I, R,
                                                "inputs, outputs"), TrueConst);
   // 4) Distinct(components' inputs)
-  WiringPCs.emplace_back(getDistinctConstraint(IC, P, P,
-                                               "component inputs"), TrueConst);
+  //WiringPCs.emplace_back(getDistinctConstraint(IC, P, P,
+  //                                             "component inputs"), TrueConst);
+
   // 5) Distinct(components' inputs, output)
   WiringPCs.emplace_back(getDistinctConstraint(IC, P, std::vector<LocInst>{O},
                                                "component inputs, output"), TrueConst);
@@ -134,6 +135,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   //WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
   //WiringPCs.emplace_back(getComponentConstInputConstraint(IC), TrueConst);
 
+  WiringPCs.emplace_back(getComponentInputConstraint2(IC), TrueConst);
   WiringPCs.emplace_back(getComponentOutputConstraint(IC), TrueConst);
 
   // Create the main wiring query (aka connectivity contraint)
@@ -149,7 +151,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // The number 4 was derived experimentally giving a good overall speed-up
   // for both small and big synthesis queries
   //EC = getInitialConcreteInputs(S, 4);
-  EC = getInitialConcreteInputs(S, 1);
+  EC = getInitialConcreteInputs(S, 4);
   if (EC)
     return EC;
 
@@ -996,6 +998,53 @@ Inst *InstSynthesis::getComponentInputConstraint(InstContext &IC) {
   return Ret;
 }
 
+Inst *InstSynthesis::getComponentInputConstraint2(InstContext &IC) {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component input constraints (implies):\n";
+  for (auto const &L_x : P) {
+    Inst *Ante = FalseConst;
+    // Inputs
+    for (auto const &In : I) {
+      if (isWiringInvalid(L_x.first, In.first))
+        continue;
+      Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, In.second});
+      Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
+      if (DebugLevel > 2)
+        llvm::outs() << getLocVarStr(L_x.first) << " == "
+                     << getLocVarStr(In.first) << " || ";
+    }
+    // Component outputs
+    for (auto const &L_y : R) {
+      // Don't constrain yourself
+      if (L_x.first.first == L_y.first.first)
+        continue;
+      if (isWiringInvalid(L_x.first, L_y.first))
+        continue;
+      Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, L_y.second});
+      Ante = IC.getInst(Inst::Or, 1, {Ante, Eq});
+      if (DebugLevel > 2)
+        llvm::outs() << getLocVarStr(L_x.first) << " == "
+                     << getLocVarStr(L_y.first) << " || ";
+    }
+    if (DebugLevel > 2)
+      llvm::outs() << "false\n";
+    if (Ante == FalseConst)
+      report_fatal_error("no input available for " + getLocVarStr(L_x.first));
+
+    // Adding implies
+    Inst *Ult1 = IC.getInst(Inst::Ult, 1, {L_x.second, O.second});
+    Inst *Eq = IC.getInst(Inst::Eq, 1, {Ult1, FalseConst});
+    Inst *Implies = IC.getInst(Inst::Or, 1, {Eq, Ante});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Implies});
+    //
+
+    //Ret = IC.getInst(Inst::And, 1, {Ret, Ante});
+  }
+
+  return Ret;
+}
 
 Inst *InstSynthesis::getComponentOutputConstraint(InstContext &IC) {
   Inst *Ret = FalseConst;
@@ -1104,8 +1153,6 @@ Inst *InstSynthesis::createInstFromModel(const SolverSolution &Solution,
       llvm::outs() << E.first << "\t";
       for (auto const &Loc : E.second)
         llvm::outs() << getLocVarStr(Loc) << " ";
-      if (E.second.size() > 2)
-        report_fatal_error("synthesis bug: more than two components on one line");
       llvm::outs() << "\n";
     }
   }

@@ -244,6 +244,7 @@ private:
   /// Each component's input should be wired either to an input
   /// or to a component's output
   Inst *getComponentInputConstraint(InstContext &IC);
+  Inst *getComponentInputConstraint2(InstContext &IC);
 
   /// Each component's inputs shall not be constants only
   Inst *getComponentConstInputConstraint(InstContext &IC);
