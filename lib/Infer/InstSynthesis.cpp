@@ -41,7 +41,7 @@ static cl::opt<bool> IgnoreCost("souper-synthesis-ignore-cost",
 static cl::opt<unsigned> MaxWiringAttempts("souper-synthesis-wiring-iterations",
     cl::Hidden,
     cl::desc("Number of convergence iterations of wirings that contain constants"),
-    cl::init(10));
+    cl::init(100));
 
 }
 
@@ -98,7 +98,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       printInitInfo();
   }
 
-  //setInvalidWirings();
+  setInvalidWirings();
+  //setInvalidWirings2();
 
   // Init a new set of path conditions
   std::vector<InstMapping> WiringPCs;
@@ -313,7 +314,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       
       // We need to get the concrete LHS output of the counter-example
       llvm::APInt Result;
+      llvm::outs() << "# start\n";
       EC = getConcreteLHSOutput(ValueMap, Result);
+      llvm::outs() << "# end\n";
       if (EC)
         report_fatal_error("cannot produce output with concrete input");
       // Update the cex map with LHS output
@@ -660,6 +663,42 @@ void InstSynthesis::setInvalidWirings() {
       InvalidWirings.insert(std::make_pair(I[J].first, I[K].first));
 }
 
+void InstSynthesis::setInvalidWirings2() {
+  // Forbid width mismatches
+  std::vector<LocInst> Tmp(P.begin(), P.end());
+  Tmp.push_back(O);
+  // -> Compare inputs
+  for (auto const &In : I) {
+    unsigned Width = CompInstMap[In.first]->Width;
+    // with component inputs and the output
+    for (auto const &L_x : Tmp) {
+      if (Width == CompInstMap[L_x.first]->Width) {
+        if (L_x.first.second == 0)
+          continue;
+        if (Comps[L_x.first.first-1].Kind != Inst::Select)
+          continue;
+        if (L_x.first.second != 1)
+          continue;
+      }
+      InvalidWirings.insert(std::make_pair(In.first, L_x.first));
+    }
+  }
+  // -> Compare outputs
+  for (auto const &L_y : R) {
+    unsigned Width = CompInstMap[L_y.first]->Width;
+    // with component inputs and the output
+    for (auto const &L_x : Tmp) {
+      // Don't constrain yourself
+      if (L_y.first.first == L_x.first.first)
+        continue;
+      if (Width == CompInstMap[L_x.first]->Width)
+        continue;
+      InvalidWirings.insert(std::make_pair(L_y.first, L_x.first));
+    }
+  }
+
+}
+
 Inst *InstSynthesis::getDistinctConstraint(InstContext &IC,
                                            const std::vector<LocInst> &Left,
                                            const std::vector<LocInst> &Right,
@@ -904,6 +943,9 @@ Inst *InstSynthesis::getConnectivityConstraint2(InstContext &IC) {
     for (unsigned K = 0; K < P.size(); ++K) {
       auto const &L_x = I[J];
       auto const &L_y = P[K];
+      // Skip invalid wirings
+      if (isWiringInvalid(L_x.first, L_y.first))
+        continue;
       auto const &X = CompInstMap[L_x.first];
       auto const &Y = CompInstMap[L_y.first];
       if (DebugLevel > 3)
@@ -922,6 +964,9 @@ Inst *InstSynthesis::getConnectivityConstraint2(InstContext &IC) {
     for (unsigned K = 0; K < P.size(); ++K) {
       auto const &L_x = R[J];
       auto const &L_y = P[K];
+      // Skip invalid wirings
+      if (isWiringInvalid(L_x.first, L_y.first))
+        continue;
       if (L_x.first.first == L_y.first.first)
         continue;
       auto const &X = CompInstMap[L_x.first];
@@ -943,6 +988,9 @@ Inst *InstSynthesis::getConnectivityConstraint2(InstContext &IC) {
   for (auto const &L_y : Tmp) {
     auto const &X = CompInstMap[O.first];
     auto const &Y = CompInstMap[L_y.first];
+    // Skip invalid wirings
+    if (isWiringInvalid(O.first, L_y.first))
+      continue;
     if (DebugLevel > 3)
       llvm::outs() << getLocVarStr(O.first) << " == "
                    << getLocVarStr(L_y.first) << "\n";

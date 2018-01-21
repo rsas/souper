@@ -212,6 +212,7 @@ private:
   /// These invalid wirings are not encoded as constraints, they are
   /// simply skipped during connectivity constraint creation
   void setInvalidWirings();
+  void setInvalidWirings2();
 
   /// Mimic of Distinct function in SMT-LIB
   Inst *getDistinctConstraint(InstContext &IC,
