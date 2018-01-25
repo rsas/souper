@@ -177,7 +177,7 @@ private:
   /// Components' operand locations
   std::vector<std::vector<LocVar>> CompOpLocVars;
   /// Location variable's width (increase for support of >256 comps+inputs)
-  const unsigned LocInstWidth = 8;
+  const unsigned LocInstWidth = 16;
   /// A mapping from a location variable's string representation to its location.
   /// Required during model parsing
   std::map<std::string, LocInst> LocInstMap;

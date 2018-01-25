@@ -86,8 +86,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   N = I.size();
   //M = Comps.size() + N;
   M = Comps.size() * 3 + N;
-  //M = 100;
-  assert(M < (1<<LocInstWidth) && "too many inputs and components");
+  M = 1000;
+  //assert(M < (1<<LocInstWidth) && "too many inputs and components");
 
   int LHSCost = cost(LHS);
 
@@ -110,11 +110,12 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getDistinctConstraint(IC, R, R, "outputs"), TrueConst);
 
   // 2) Distinct(inputs)
-  WiringPCs.emplace_back(getDistinctConstraint(IC, I, I,
-                                               "inputs"), TrueConst);
+  //WiringPCs.emplace_back(getDistinctConstraint(IC, I, I,
+  //                                             "inputs"), TrueConst);
   // 3) Distinct(inputs, components' outputs)
-  WiringPCs.emplace_back(getDistinctConstraint(IC, I, R,
-                                               "inputs, outputs"), TrueConst);
+  //WiringPCs.emplace_back(getDistinctConstraint(IC, I, R,
+  //                                             "inputs, outputs"), TrueConst);
+
   // 4) Distinct(components' inputs)
   //WiringPCs.emplace_back(getDistinctConstraint(IC, P, P,
   //                                             "component inputs"), TrueConst);
@@ -128,7 +129,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
   // - Location constraints of inputs, constants, components' inputs and outputs
   WiringPCs.emplace_back(getLocVarConstraint2(IC), TrueConst);
-  WiringPCs.emplace_back(getLocVarConstraint3(IC), TrueConst);
+  //WiringPCs.emplace_back(getLocVarConstraint3(IC), TrueConst);
 
   // TODO: Remove
   //WiringPCs.emplace_back(getConsistencyConstraint(IC), TrueConst);
@@ -314,20 +315,13 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       
       // We need to get the concrete LHS output of the counter-example
       llvm::APInt Result;
-      llvm::outs() << "# start\n";
       EC = getConcreteLHSOutput(ValueMap, Result);
-      llvm::outs() << "# end\n";
       if (EC)
         report_fatal_error("cannot produce output with concrete input");
       // Update the cex map with LHS output
       ValueMap[CompInstMap[O.first]] = LIC->getConst(Result);
       if (DebugLevel > 2)
         llvm::outs() << "LHS output: " << Result << "\n";
-
-      // Counterexamples must be unique in each iteration
-      for (auto const &E : S)
-        if (std::equal(E.begin(), E.end(), ValueMap.begin()))
-          report_fatal_error("counter-examples are not unique!");
 
       // Add counterexamples to S
       S.push_back(ValueMap);
@@ -827,16 +821,22 @@ Inst *InstSynthesis::getLocVarConstraint2(InstContext &IC) {
 
   if (DebugLevel > 2)
     llvm::outs() << "location variable constraints:\n";
-  std::vector<LocInst> Tmp(I.begin(), I.end());
-  Tmp.insert(Tmp.end(), R.begin(), R.end());
-  // All inputs and outputs
-  for (auto const &L_x : Tmp) {
+  // All inputs
+  for (unsigned J = 0; J < I.size(); ++J) {
+    auto const &L_x = I[J];
     if (DebugLevel > 2)
-      llvm::outs() << "0 <= " << getLocVarStr(L_x.first)
+      llvm::outs() << getLocVarStr(L_x.first) << " == " << J << "\n";
+    Inst *Eq = IC.getInst(Inst::Eq, 1, {L_x.second, IC.getConst(APInt(LocInstWidth, J))});
+    Ret = IC.getInst(Inst::And, 1, {Ret, Eq});
+  }
+  // All outputs
+  for (auto const &L_x : R) {
+    if (DebugLevel > 2)
+      llvm::outs() << I.size() << " <= " << getLocVarStr(L_x.first)
                    << " < " << M << "\n";
     Inst *Ult =
       IC.getInst(Inst::Ult, 1,
-                 {L_x.second, IC.getConst(APInt(L_x.second->Width, 0))});
+                 {L_x.second, IC.getConst(APInt(LocInstWidth, I.size()))});
     Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, 0))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
 
@@ -844,10 +844,8 @@ Inst *InstSynthesis::getLocVarConstraint2(InstContext &IC) {
                      {L_x.second, IC.getConst(APInt(L_x.second->Width, M))});
     Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
   }
-  Tmp.clear();
-  Tmp.insert(Tmp.begin(), P.begin(), P.end());
   // All component inputs
-  for (auto const &L_x : Tmp) {
+  for (auto const &L_x : P) {
     if (DebugLevel > 2)
       llvm::outs() << "0 <= " << getLocVarStr(L_x.first)
                    << " < " << M << "\n";
@@ -886,20 +884,25 @@ Inst *InstSynthesis::getOutputLocVarConstraint(int Begin, int End,
                                                InstContext &IC) {
   Inst *Ret = TrueConst;
 
-  Inst *Ult = IC.getInst(Inst::Ult, 1,
-                         {O.second, IC.getConst(APInt(O.second->Width, Begin))});
-  if (DebugLevel > 2)
-    llvm::outs() << Begin << " <= " << getLocVarStr(O.first);
+  //Inst *Ult = IC.getInst(Inst::Ult, 1,
+  //                       {O.second, IC.getConst(APInt(O.second->Width, Begin))});
+  //if (DebugLevel > 2)
+  //  llvm::outs() << Begin << " <= " << getLocVarStr(O.first);
 
-  Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, 0))});
-  Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
+  //Inst *Ne = IC.getInst(Inst::Eq, 1, {Ult, IC.getConst(APInt(1, 0))});
+  //Ret = IC.getInst(Inst::And, 1, {Ret, Ne});
 
-  Ult = IC.getInst(Inst::Ult, 1, {O.second,
-                                  IC.getConst(APInt(O.second->Width,
-                                              End))});
-  if (DebugLevel > 2)
-    llvm::outs() << " < " << End << "\n";
-  Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
+  //Ult = IC.getInst(Inst::Ult, 1, {O.second,
+  //                                IC.getConst(APInt(O.second->Width,
+  //                                            End))});
+  //if (DebugLevel > 2)
+  //  llvm::outs() << " < " << End << "\n";
+
+  //Ret = IC.getInst(Inst::And, 1, {Ret, Ult});
+
+  Inst *Eq = IC.getInst(Inst::Eq, 1, {O.second, IC.getConst(APInt(LocInstWidth, End))});
+
+  Ret = IC.getInst(Inst::And, 1, {Ret, Eq});
 
   return Ret;
 }
