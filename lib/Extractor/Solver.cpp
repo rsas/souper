@@ -90,20 +90,26 @@ class BaseSolver : public Solver {
   }
 
   Inst *getInstCopy(Inst *I, InstContext &IC,
-                    std::map<Inst *, Inst *> &Replacements) {
+                    std::map<Inst *, Inst *> &InstCache,
+                    std::map<Block *, Block *> &BlockCache) {
     std::vector<Inst *> Ops;
     for (auto const &Op : I->Ops)
-      Ops.push_back(getInstCopy(Op, IC, Replacements));
+      Ops.push_back(getInstCopy(Op, IC, InstCache, BlockCache));
 
     if (I->K == Inst::Var) {
-      if (!Replacements.count(I)) {
+      if (!InstCache.count(I)) {
         Inst *Copy = IC.createVar(I->Width, "copy");
-        Replacements[I] = Copy;
+        InstCache[I] = Copy;
         return Copy;
       } else
-        return Replacements.at(I);
+        return InstCache.at(I);
     } else if (I->K == Inst::Phi)
-      return IC.getPhi(I->B, Ops);
+      if (!BlockCache.count(I->B)) {
+        auto BlockCopy = IC.createBlock(I->B->Preds);
+        BlockCache[I->B] = BlockCopy;
+        return IC.getPhi(BlockCopy, Ops);
+      } else
+        return IC.getPhi(BlockCache.at(I->B), Ops);
     else if (I->K == Inst::Const || I->K == Inst::UntypedConst)
       return I;
     else
@@ -198,9 +204,10 @@ public:
         if (LHS == I)
           continue;
         // separate sub-expressions by copying vars
-        std::map<Inst *, Inst *> Replacements;
-        Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, Replacements),
-                                            getInstCopy(I, IC, Replacements)});
+        std::map<Inst *, Inst *> InstCache;
+        std::map<Block *, Block *> BlockCache;
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, InstCache, BlockCache),
+                                            getInstCopy(I, IC, InstCache, BlockCache)});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
