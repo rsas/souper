@@ -200,6 +200,7 @@ public:
       findCands(LHS, Visited, Guesses, LHS->Width, 0);
 
       Inst *Ante = IC.getConst(APInt(1, true));
+      BlockPCs BPCsCopy;
       std::vector<InstMapping> PCsCopy;
       for (auto I : Guesses) {
         if (LHS == I)
@@ -210,6 +211,14 @@ public:
         Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, InstCache, BlockCache),
                                             getInstCopy(I, IC, InstCache, BlockCache)});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
+        // separate BPCs
+        for (const auto &BPC : BPCs) {
+          auto BPCCopy = BPC;
+          BPCCopy.B = BlockCache[BPC.B];
+          BPCCopy.PC = InstMapping(getInstCopy(BPC.PC.LHS, IC, InstCache, BlockCache),
+                                   getInstCopy(BPC.PC.RHS, IC, InstCache, BlockCache));
+          BPCsCopy.emplace_back(BPCCopy);
+        }
         // separate PCs
         for (const auto &PC : PCs)
           PCsCopy.emplace_back(getInstCopy(PC.LHS, IC, InstCache, BlockCache),
@@ -217,7 +226,7 @@ public:
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
       InstMapping Mapping(Ante, IC.getConst(APInt(1, true)));
-      std::string Query = BuildQuery(BPCs, PCsCopy, Mapping, 0, /*Negate=*/true);
+      std::string Query = BuildQuery(BPCsCopy, PCsCopy, Mapping, 0, /*Negate=*/true);
       if (Query.empty())
         return std::make_error_code(std::errc::value_too_large);
       bool IsSat;
