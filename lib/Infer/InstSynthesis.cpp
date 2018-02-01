@@ -313,6 +313,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         }
       }
       
+#if 0
       // We need to get the concrete LHS output of the counter-example
       llvm::APInt Result;
       EC = getConcreteLHSOutput(ValueMap, Result);
@@ -322,6 +323,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       ValueMap[CompInstMap[O.first]] = LIC->getConst(Result);
       if (DebugLevel > 2)
         llvm::outs() << "LHS output: " << Result << "\n";
+#endif
 
       // Add counterexamples to S
       S.push_back(ValueMap);
@@ -547,8 +549,8 @@ void InstSynthesis::initOutput(InstContext &IC) {
   LocInstMap[LocVarStr] = O;
   // Update CompInstMap map with concrete Inst
   LocVarStr = getLocVarStr(Out, OUTPUT_PREFIX);
-  CompInstMap[Out] = IC.createVar(LHS->Width, LocVarStr);
-  //CompInstMap[Out] = LHS;
+  //CompInstMap[Out] = IC.createVar(LHS->Width, LocVarStr);
+  CompInstMap[Out] = LHS;
 }
 
 void InstSynthesis::initLocations() {
@@ -1182,10 +1184,13 @@ Inst *InstSynthesis::getInstCopy(Inst *I, InstContext &IC,
   } else if (I->K == Inst::Phi) {
     return IC.getPhi(I->B, Ops);
   } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
+    return I;
+#if 0
     if (!Replacements.count(I))
       return I;
     // Replace
     return Replacements.at(I);
+#endif
   } else {
     return IC.getInst(I->K, I->Width, Ops);
   }
@@ -1641,7 +1646,7 @@ void InstSynthesis::forbidInvalidCandWiring(const ProgramWiring &CandWiring,
     Ante = IC.getInst(Inst::And, 1, {Ante, Eq});
   }
   LoopPCs.emplace_back(Ante, FalseConst);
-  WiringPCs.emplace_back(Ante, FalseConst);
+  //WiringPCs.emplace_back(Ante, FalseConst);
 }
 
 int InstSynthesis::costHelper(Inst *I, std::set<Inst *> &Visited) {
