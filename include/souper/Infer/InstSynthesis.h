@@ -190,17 +190,17 @@ private:
   void setCompLibrary();
 
   /// Initalize input variable locations
-  void initInputVars(InstContext &IC);
+  void initInputVars();
 
   /// Initalize components' input locations, output locations,
   /// and components' concrete instruction instances
-  void initComponents(InstContext &IC);
+  void initComponents();
 
   /// Initalize constant components
-  void initConstComponents(InstContext &IC);
+  void initConstComponents();
 
   /// Initalize output location
-  void initOutput(InstContext &IC);
+  void initOutput();
 
   /// Initalize locations L
   void initLocations();
@@ -215,15 +215,14 @@ private:
   void setInvalidWirings2();
 
   /// Mimic of Distinct function in SMT-LIB
-  Inst *getDistinctConstraint(InstContext &IC,
-                              const std::vector<LocInst> &Left,
+  Inst *getDistinctConstraint(const std::vector<LocInst> &Left,
                               const std::vector<LocInst> &Right,
                               const std::string &Desc = "");
 
   /// Every line in the program has at most one component.
   /// Don't wire semantically invalid variable locations,
   /// e.g., a component's output to its inputs
-  Inst *getConsistencyConstraint(InstContext &IC);
+  Inst *getConsistencyConstraint();
 
   /// In a well-formed program, every variable is initialized
   /// before it is used. For every component, if x is an input
@@ -231,39 +230,38 @@ private:
   /// then the location l_x where the input is defined, should
   /// be earlier than the location l_y where the component is
   /// positioned and its output is defined
-  Inst *getAcyclicityConstraint(InstContext &IC);
+  Inst *getAcyclicityConstraint();
 
   /// phi_P: Forall x in P \cup I: 0 <= l_x <= M-1
   /// phi_R: Forall x in R: |N| <= l_x <= M-1
-  Inst *getLocVarConstraint(InstContext &IC);
-  Inst *getLocVarConstraint2(InstContext &IC);
-  Inst *getLocVarConstraint3(InstContext &IC);
+  Inst *getLocVarConstraint();
+  Inst *getLocVarConstraint2();
+  Inst *getLocVarConstraint3();
 
   /// Begin <= O < End
-  Inst *getOutputLocVarConstraint(int Begin, int End, InstContext &IC);
+  Inst *getOutputLocVarConstraint(int Begin, int End);
 
   /// Each component's input should be wired either to an input
   /// or to a component's output
-  Inst *getComponentInputConstraint(InstContext &IC);
-  Inst *getComponentInputConstraint2(InstContext &IC);
+  Inst *getComponentInputConstraint();
+  Inst *getComponentInputConstraint2();
 
   /// Each component's inputs shall not be constants only
-  Inst *getComponentConstInputConstraint(InstContext &IC);
+  Inst *getComponentConstInputConstraint();
 
   /// Output must be wired to either a component's output or input(s)
-  Inst *getComponentOutputConstraint(InstContext &IC);
+  Inst *getComponentOutputConstraint();
 
   /// phi_conn := Forall x,y \in P \cup R \cup I \cup {O}: (l_x = l_y) => x = y.
   /// Given an interconnection among components specified by values of location
   /// variables L, we can relate the input/output variables of the components
   /// and the program
-  Inst *getConnectivityConstraint(InstContext &IC);
-  Inst *getConnectivityConstraint2(InstContext &IC);
+  Inst *getConnectivityConstraint();
+  Inst *getConnectivityConstraint2();
 
   /// Create a copy of instruction I replacing its input vars with vars
   /// in Replacements
-  Inst *getInstCopy(Inst *I, InstContext &IC,
-                    const std::map<Inst *, Inst *> &Replacements);
+  Inst *getInstCopy(Inst *I, const std::map<Inst *, Inst *> &Replacements);
 
   /// A mapping from program locations (line numbers) to a set of component
   /// location variables
@@ -277,16 +275,14 @@ private:
   /// Create a program from a solver model
   Inst *createInstFromModel(const SolverSolution &Solution,
                             ProgramWiring &CandWiring,
-                            std::map<LocVar, llvm::APInt> &ConstValMap,
-                            InstContext &IC);
+                            std::map<LocVar, llvm::APInt> &ConstValMap);
 
   /// Recursive instruction creation from a given program wiring
   Inst *createInstFromWiring(const LocVar &OutLoc,
                              const std::vector<LocVar> &OpLocs,
                              const LineLocVarMap &LineWiring,
                              const std::map<LocVar, llvm::APInt> &ConstValMap,
-                             ProgramWiring &CandWiring,
-                             InstContext &IC);
+                             ProgramWiring &CandWiring);
 
   /// Parse wiring models extracting concrete values for location variables
   /// and constants. Return location variable that matches the output
@@ -300,7 +296,7 @@ private:
 
   /// Create a clean Inst. E.g., return %0 if Inst is of type and %0, %0
   Inst *createCleanInst(Inst::Kind Kind, unsigned Width,
-                        std::vector<Inst *> &Ops, InstContext &IC);
+                        std::vector<Inst *> &Ops);
 
   /// Helper functions
   void filterFixedWidthIntrinsicComps();
@@ -314,8 +310,7 @@ private:
   bool isInputConst(const LocVar &Loc);
   void forbidInvalidCandWiring(const ProgramWiring &CandWiring,
                                std::vector<InstMapping> &LoopPCs,
-                               std::vector<InstMapping> &WiringPCs,
-                               InstContext &IC);
+                               std::vector<InstMapping> &WiringPCs);
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
   bool hasConst(Inst *I);
