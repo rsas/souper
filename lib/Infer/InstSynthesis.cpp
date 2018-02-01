@@ -132,10 +132,10 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   //WiringPCs.emplace_back(getLocVarConstraint3(IC), TrueConst);
 
   // TODO: Remove
-  //WiringPCs.emplace_back(getConsistencyConstraint(IC), TrueConst);
-  //WiringPCs.emplace_back(getLocVarConstraint(IC), TrueConst);
-  //WiringPCs.emplace_back(getComponentInputConstraint(IC), TrueConst);
-  //WiringPCs.emplace_back(getComponentConstInputConstraint(IC), TrueConst);
+  //WiringPCs.emplace_back(getConsistencyConstraint(), TrueConst);
+  //WiringPCs.emplace_back(getLocVarConstraint(), TrueConst);
+  //WiringPCs.emplace_back(getComponentInputConstraint(), TrueConst);
+  WiringPCs.emplace_back(getComponentConstInputConstraint(), TrueConst);
 
   WiringPCs.emplace_back(getComponentInputConstraint2(), TrueConst);
   WiringPCs.emplace_back(getComponentOutputConstraint(), TrueConst);
@@ -563,7 +563,9 @@ void InstSynthesis::initLocations() {
 
 void InstSynthesis::printInitInfo() {
   llvm::outs() << "inputs: " << Inputs.size() << ", "
-               << "constants: " << ConstComps.size() << "\n";
+               << "inputs range: [0, " << Inputs.size() << ")\n"
+               << "constants: " << ConstComps.size() << "\n"
+               << "constants range: [" << Inputs.size() << ", " << I.size() << ")\n";
   llvm::outs() << "N: " << N << ", M: " << M << "\n";
   llvm::outs() << "default width: " << DefaultWidth << "\n";
   llvm::outs() << "output width: " << LHS->Width << "\n";
@@ -1295,8 +1297,8 @@ Inst *InstSynthesis::createInstFromWiring(
                         Context);
   }
   // Sanity checks
-  //if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
-  //  report_fatal_error("inst operands are constants!");
+  if (Ops.size() == 2 && Ops[0]->K == Inst::Const && Ops[1]->K == Inst::Const)
+    report_fatal_error("inst operands are constants!");
   assert(Comp.Width == 1 || Comp.Width == DefaultWidth ||
          Comp.Width == LHS->Width);
   // Create instruction
