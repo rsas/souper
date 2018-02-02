@@ -173,8 +173,6 @@ private:
   std::vector<LocInst> R;
   /// Output location O
   LocInst O;
-  /// Location variables set L (I \cup P \cup R \cup {O}).
-  std::vector<LocInst> L;
   /// Number of input variables
   unsigned N;
   /// Component locations

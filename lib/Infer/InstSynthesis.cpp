@@ -81,7 +81,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   initOutput();
   initComponents();
   initConstComponents();
-  initLocations();
 
   N = I.size();
 
@@ -148,17 +147,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
   // Iterative synthesis loop with increasing number of components
   for (int J = 1; J <= MaxCompNum; ++J) {
-    Inst *CompConstraint;
     if (DebugLevel > 1)
       llvm::outs() << "++++++++++++++++++++ "
                    << "synthesizing using " << J << " component(s)"
                    << " ++++++++++++++++++++\n";
-    // Constrain output locaction
-    //CompConstraint = getOutputLocVarConstraint(N, N+J);
-    CompConstraint = getLocVarConstraint({O}, N+J, N+J);
     // Init fresh loop PCs
     auto LoopPCs = WiringPCs;
-    LoopPCs.emplace_back(CompConstraint, TrueConst);
+    // Constrain output locaction
+    LoopPCs.emplace_back(getLocVarConstraint({O}, N+J-1, N+J-1), TrueConst);
 
     // --------------------------------------------------------------------------
     // -------------- Counterexample driven synthesis loop ----------------------
@@ -289,10 +285,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (hasConst(Cand)) {
         constrainConstWiring(Cand, CandWiring, NotWorkingConstWirings,
                              ConstValMap, LoopPCs, WiringPCs);
-      } else {
-        // Forbid invalid constant-free wirings explicitly in the future,
-        // so they don't show up in the wiring result
-        //forbidInvalidCandWiring(CandWiring, LoopPCs);
       }
     }
   }
@@ -507,14 +499,6 @@ void InstSynthesis::initOutput() {
   CompInstMap[Out] = LHS;
 }
 
-void InstSynthesis::initLocations() {
-  // We must add I and {O} to L too (not mentioned in the paper)
-  L.insert(L.end(), I.begin(), I.end());
-  L.insert(L.end(), P.begin(), P.end());
-  L.insert(L.end(), R.begin(), R.end());
-  L.push_back(O);
-}
-
 void InstSynthesis::printInitInfo() {
   llvm::outs() << "inputs: " << Inputs.size() << ", "
                << "inputs range: [0, " << Inputs.size() << ")\n"
@@ -546,10 +530,6 @@ void InstSynthesis::printInitInfo() {
   llvm::outs() << "\n";
   llvm::outs() << "R: ";
   for (auto const &In : R)
-    llvm::outs() << getLocVarStr(In.first) << " ";
-  llvm::outs() << "\n";
-  llvm::outs() << "L: ";
-  for (auto const &In : L)
     llvm::outs() << getLocVarStr(In.first) << " ";
   llvm::outs() << "\n";
   llvm::outs() << "O: " << getLocVarStr(O.first) << "\n";
@@ -718,6 +698,8 @@ Inst *InstSynthesis::getLocVarConstraint(const std::vector<LocInst> &L,
 
       Ret = LIC->getInst(Inst::And, 1, {Ret, Ult});
     } else {
+      if (DebugLevel > 2)
+        llvm::outs() << getLocVarStr(Tmp.first) << " == " << End << "\n";;
       Inst *Eq = LIC->getInst(Inst::Eq, 1, {Tmp.second,
                                             LIC->getConst(APInt(LocInstWidth, End))});
       Ret = LIC->getInst(Inst::And, 1, {Ret, Eq});
@@ -798,7 +780,6 @@ Inst *InstSynthesis::getConnectivityConstraint() {
 
   return Ret;
 }
-
 
 Inst *InstSynthesis::getComponentInputConstraint() {
   Inst *Ret = TrueConst;
