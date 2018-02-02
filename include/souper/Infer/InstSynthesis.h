@@ -242,6 +242,8 @@ private:
   /// or to a component's output
   Inst *getComponentInputConstraint();
 
+  Inst *getConstInequalityConstraint();
+
   /// Each component's inputs shall not be constants only
   Inst *getComponentConstInputConstraint();
 

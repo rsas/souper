@@ -108,6 +108,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   WiringPCs.emplace_back(getLocVarConstraint(R, N, M), TrueConst);
 
   // Different constraints
+  //WiringPCs.emplace_back(getConstInequalityConstraint(), TrueConst);
   WiringPCs.emplace_back(getComponentConstInputConstraint(), TrueConst);
   WiringPCs.emplace_back(getComponentInputConstraint(), TrueConst);
   WiringPCs.emplace_back(getComponentInputSymmetryConstraint(), TrueConst);
@@ -652,8 +653,8 @@ Inst *InstSynthesis::getAcyclicityConstraint() {
     //
     Inst *Ult1 = LIC->getInst(Inst::Ult, 1, {L_x.second, O.second});
     Inst *Ult2 = LIC->getInst(Inst::Ule, 1, {L_y.second, O.second});
-    Inst *Eq = LIC->getInst(Inst::Eq, 1, {Ult1, FalseConst});
-    Inst *Implies = LIC->getInst(Inst::Or, 1, {Eq, Ult2});
+    Inst *IsZero = LIC->getInst(Inst::Eq, 1, {Ult1, FalseConst});
+    Inst *Implies = LIC->getInst(Inst::Or, 1, {IsZero, Ult2});
     Ret = LIC->getInst(Inst::And, 1, {Ret, Implies});
     //
   }
@@ -858,6 +859,32 @@ Inst *InstSynthesis::getComponentOutputConstraint() {
   }
   if (DebugLevel > 2)
     llvm::outs() << "false\n";
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getConstInequalityConstraint() {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "const input inequality constraints:\n";
+
+  for (unsigned J = Inputs.size(); J < N; ++J) {
+    auto const &L_x = I[J];
+    unsigned Width = CompInstMap[L_x.first]->Width;
+    for (unsigned K = J+1; K < N; ++K) {
+      auto const &L_y = I[K];
+      if (Width != CompInstMap[L_y.first]->Width)
+        continue;
+      auto const &X = CompInstMap[L_x.first];
+      auto const &Y = CompInstMap[L_y.first];
+      if (DebugLevel > 3)
+        llvm::outs() << getLocVarStr(L_x.first) << " != "
+                     << getLocVarStr(L_y.first) << "\n";
+      Inst *Ne = LIC->getInst(Inst::Ne, 1, {X, Y});
+      Ret = LIC->getInst(Inst::And, 1, {Ret, Ne});
+    }
+  }
 
   return Ret;
 }
