@@ -177,8 +177,8 @@ private:
   std::vector<LocInst> L;
   /// Number of input variables
   unsigned N;
-  /// Number of components + N
-  unsigned M;
+  /// Component locations
+  const unsigned M = 1024;
   /// A mapping from a location variable to a concrete component instance,
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
@@ -220,17 +220,11 @@ private:
   /// These invalid wirings are not encoded as constraints, they are
   /// simply skipped during connectivity constraint creation
   void setInvalidWirings();
-  void setInvalidWirings2();
 
   /// Mimic of Distinct function in SMT-LIB
   Inst *getDistinctConstraint(const std::vector<LocInst> &Left,
                               const std::vector<LocInst> &Right,
                               const std::string &Desc = "");
-
-  /// Every line in the program has at most one component.
-  /// Don't wire semantically invalid variable locations,
-  /// e.g., a component's output to its inputs
-  Inst *getConsistencyConstraint();
 
   /// In a well-formed program, every variable is initialized
   /// before it is used. For every component, if x is an input
@@ -240,19 +234,15 @@ private:
   /// positioned and its output is defined
   Inst *getAcyclicityConstraint();
 
-  /// phi_P: Forall x in P \cup I: 0 <= l_x <= M-1
-  /// phi_R: Forall x in R: |N| <= l_x <= M-1
-  Inst *getLocVarConstraint();
-  Inst *getLocVarConstraint2();
-  Inst *getLocVarConstraint3();
+  Inst *getInputLocVarConstraint();
 
   /// Begin <= O < End
-  Inst *getOutputLocVarConstraint(int Begin, int End);
+  Inst *getLocVarConstraint(const std::vector<LocInst> &L,
+                            int Begin, int End);
 
   /// Each component's input should be wired either to an input
   /// or to a component's output
   Inst *getComponentInputConstraint();
-  Inst *getComponentInputConstraint2();
 
   /// Each component's inputs shall not be constants only
   Inst *getComponentConstInputConstraint();
@@ -268,7 +258,6 @@ private:
   /// variables L, we can relate the input/output variables of the components
   /// and the program
   Inst *getConnectivityConstraint();
-  Inst *getConnectivityConstraint2();
 
   /// Create a copy of instruction I replacing its input vars with vars
   /// in Replacements
