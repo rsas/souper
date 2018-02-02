@@ -332,8 +332,10 @@ void InstSynthesis::setCompLibrary() {
   } else {
     InitComps = CompLibrary;
     // one constant per component
-    for (auto const &Comp : CompLibrary)
-      InitConstComps.push_back(Component{Inst::Const, 0, {}});
+    //for (auto const &Comp : CompLibrary)
+    //  InitConstComps.push_back(Component{Inst::Const, 0, {}});
+    InitConstComps.push_back(Component{Inst::Const, 0, {}});
+    InitConstComps.push_back(Component{Inst::Const, 0, {}});
   }
   for (auto const &In : Inputs) {
     if (In->Width == DefaultWidth)
@@ -866,33 +868,15 @@ Inst *InstSynthesis::getComponentConstInputConstraint() {
   if (DebugLevel > 2)
     llvm::outs() << "component const input constraints:\n";
 
-  // Forbid a component's operands to be constants only.
-  // An exemplary query that must hold true for a single component
-  // with two inputs and two constants:
-  // true && (false || (compin_1 == const_1) || (compin_1 == const_2))
-  //      && (false || (compin_2 == const_1) || (compin_2 == const_2)) == false
   for (auto const &E : CompOpLocVars) {
     Inst *CompAnte = TrueConst;
     for (auto const &CompIn : E) {
-      Inst *Ante = FalseConst;
       auto LocVarStr = getLocVarStr(CompIn, LOC_PREFIX);
-      for (auto const &In : I) {
-        if (!isInputConst(In.first))
-          continue;
-        if (isWiringInvalid(CompIn, In.first))
-          continue;
-        Inst *Eq = LIC->getInst(Inst::Eq, 1, {LocInstMap[LocVarStr].second, In.second});
-        Ante = LIC->getInst(Inst::Or, 1, {Ante, Eq});
-        if (DebugLevel > 2)
-          llvm::outs() << getLocVarStr(CompIn) << " == "
-                       << getLocVarStr(In.first) << " || ";
-      }
-      if (DebugLevel > 2)
-        llvm::outs() << "false\n";
-      CompAnte = LIC->getInst(Inst::And, 1, {CompAnte, Ante});
+      Inst *ConstRange = getLocVarConstraint({LocInstMap[LocVarStr]}, Inputs.size(), N);
+      CompAnte = LIC->getInst(Inst::And, 1, {CompAnte, ConstRange});
     }
     if (DebugLevel > 2)
-      llvm::outs() << "false\n";
+      llvm::outs() << "=> false\n";
     Inst *Ne = LIC->getInst(Inst::Eq, 1, {CompAnte, FalseConst});
     Ret = LIC->getInst(Inst::And, 1, {Ret, Ne});
   }
