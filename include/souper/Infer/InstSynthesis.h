@@ -125,6 +125,14 @@ static const std::vector<Component> CompLibrary = {
   Component{Inst::Ctlz, 0, {0}}
 };
 
+/// Operand order of these components is not important
+static const std::set<Inst::Kind> SymmetricComps = {
+    Inst::Add, Inst::Mul, Inst::And, Inst::Or, Inst::Xor,
+    Inst::Eq, Inst::Ne,
+    Inst::AddNSW, Inst::AddNUW, Inst::AddNW,
+    Inst::MulNSW, Inst::MulNUW, Inst::MulNW,
+};
+
 class InstSynthesis {
 public:
   // Synthesize an instruction from the specification in LHS
@@ -249,6 +257,9 @@ private:
   /// Each component's inputs shall not be constants only
   Inst *getComponentConstInputConstraint();
 
+  /// Component candidates shall be unique
+  Inst *getComponentInputSymmetryConstraint();
+
   /// Output must be wired to either a component's output or input(s)
   Inst *getComponentOutputConstraint();
 
@@ -261,7 +272,8 @@ private:
 
   /// Create a copy of instruction I replacing its input vars with vars
   /// in Replacements
-  Inst *getInstCopy(Inst *I, const std::map<Inst *, Inst *> &Replacements);
+  Inst *getInstCopy(Inst *I, std::map<Inst *, Inst *> &InstCache,
+                             std::map<Block *, Block *> &BlockCache);
 
   /// A mapping from program locations (line numbers) to a set of component
   /// location variables
@@ -309,14 +321,13 @@ private:
   bool isWiringInvalid(const LocVar &Left, const LocVar &Right);
   bool isInputConst(const LocVar &Loc);
   void forbidInvalidCandWiring(const ProgramWiring &CandWiring,
-                               std::vector<InstMapping> &LoopPCs,
-                               std::vector<InstMapping> &WiringPCs);
+                               std::vector<InstMapping> &LoopPCs);
   int costHelper(Inst *I, std::set<Inst *> &Visited);
   int cost(Inst *I);
   bool hasConst(Inst *I);
   std::error_code getInitialConcreteInputs(std::vector<std::map<Inst *, Inst *>> &S,
                                            unsigned NumInputs);
-  std::error_code getConcreteLHSOutput(const std::map<Inst *, Inst *> &ConcreteInputs,
+  std::error_code getConcreteLHSOutput(std::map<Inst *, Inst *> &ConcreteInputs,
                                        llvm::APInt &Result);
   Inst *initConcreteInputWirings(Inst *Query, Inst *WiringQuery,
                                  unsigned Refinements,

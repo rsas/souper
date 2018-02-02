@@ -47,6 +47,7 @@ static cl::opt<unsigned> MaxWiringAttempts("souper-synthesis-wiring-iterations",
 
 namespace souper {
 
+static const std::string BLOCK_PREFIX = "blockpred";
 static const std::string INPUT_PREFIX = "in_";
 static const std::string OUTPUT_PREFIX = "out_";
 static const std::string LOC_PREFIX = "loc_";
@@ -136,6 +137,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   //WiringPCs.emplace_back(getLocVarConstraint(), TrueConst);
   //WiringPCs.emplace_back(getComponentInputConstraint(), TrueConst);
   WiringPCs.emplace_back(getComponentConstInputConstraint(), TrueConst);
+  WiringPCs.emplace_back(getComponentInputSymmetryConstraint(), TrueConst);
 
   WiringPCs.emplace_back(getComponentInputConstraint2(), TrueConst);
   WiringPCs.emplace_back(getComponentOutputConstraint(), TrueConst);
@@ -152,7 +154,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Ask the solver for four initial concrete inputs.
   // The number 4 was derived experimentally giving a good overall speed-up
   // for both small and big synthesis queries
-  //EC = getInitialConcreteInputs(S, 4);
   EC = getInitialConcreteInputs(S, 4);
   if (EC)
     return EC;
@@ -244,8 +245,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         PrintReplacementRHS(llvm::outs(), Cand, Context);
       }
 
-      if (!CandSeen.insert(Cand).second)
-        report_fatal_error("synthesis bug: candidate has been seen already");
+      //if (!CandSeen.insert(Cand).second)
+      //  report_fatal_error("synthesis bug: candidate has been seen already");
 
       // The synthesis loop assumes that each component has a cost of one.
 
@@ -263,7 +264,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       if (!IgnoreCost && Benefit <= 0) {
         if (DebugLevel > 1)
           llvm::outs() << "candidate has no benefit\n";
-        forbidInvalidCandWiring(CandWiring, LoopPCs, WiringPCs);
+        forbidInvalidCandWiring(CandWiring, LoopPCs);
         continue;
       }
 
@@ -313,18 +314,6 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
         }
       }
       
-#if 0
-      // We need to get the concrete LHS output of the counter-example
-      llvm::APInt Result;
-      EC = getConcreteLHSOutput(ValueMap, Result);
-      if (EC)
-        report_fatal_error("cannot produce output with concrete input");
-      // Update the cex map with LHS output
-      ValueMap[CompInstMap[O.first]] = LIC->getConst(Result);
-      if (DebugLevel > 2)
-        llvm::outs() << "LHS output: " << Result << "\n";
-#endif
-
       // Add counterexamples to S
       S.push_back(ValueMap);
 
@@ -337,7 +326,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       } else {
         // Forbid invalid constant-free wirings explicitly in the future,
         // so they don't show up in the wiring result
-        //forbidInvalidCandWiring(CandWiring, LoopPCs, WiringPCs);
+        //forbidInvalidCandWiring(CandWiring, LoopPCs);
       }
     }
   }
@@ -549,7 +538,6 @@ void InstSynthesis::initOutput() {
   LocInstMap[LocVarStr] = O;
   // Update CompInstMap map with concrete Inst
   LocVarStr = getLocVarStr(Out, OUTPUT_PREFIX);
-  //CompInstMap[Out] = LIC->createVar(LHS->Width, LocVarStr);
   CompInstMap[Out] = LHS;
 }
 
@@ -1170,26 +1158,64 @@ Inst *InstSynthesis::getComponentConstInputConstraint() {
   return Ret;
 }
 
-Inst *InstSynthesis::getInstCopy(Inst *I, const std::map<Inst *, Inst *> &Replacements) {
+Inst *InstSynthesis::getComponentInputSymmetryConstraint() {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component input symmetry constraints:\n";
+
+  for (auto const &E : CompOpLocVars) {
+    LocVar OutLocVar = std::make_pair(E[0].first, 0);
+    Inst *OutInst = CompInstMap[OutLocVar];
+    if (!SymmetricComps.count(OutInst->K))
+      continue;
+    assert(OutInst->Ops.size() == 2);
+    assert(E.size() == 2);
+    if (DebugLevel > 3)
+      llvm::outs() << getLocVarStr(E[0]) << " < "
+                   << getLocVarStr(E[1]) << "\n";
+    auto LocVarStrLeft = getLocVarStr(E[0], LOC_PREFIX);
+    auto LocVarStrRight = getLocVarStr(E[1], LOC_PREFIX);
+    Inst *FirstOp = LocInstMap[LocVarStrLeft].second;
+    Inst *SecondOp = LocInstMap[LocVarStrRight].second;
+
+    Inst *Ult = LIC->getInst(Inst::Ult, 1, {FirstOp, SecondOp});
+    Ret = LIC->getInst(Inst::And, 1, {Ret, Ult});
+  }
+
+  return Ret;
+}
+
+
+Inst *InstSynthesis::getInstCopy(Inst *I,
+                                 std::map<Inst *, Inst *> &InstCache,
+                                 std::map<Block *, Block *> &BlockCache) {
   std::vector<Inst *> Ops;
   for (auto const &Op : I->Ops)
-    Ops.push_back(getInstCopy(Op, Replacements));
+    Ops.push_back(getInstCopy(Op, InstCache, BlockCache));
 
   if (I->K == Inst::Var) {
-    if (!Replacements.count(I))
+    if (!InstCache.count(I))
       return I;
     // Replace
-    return Replacements.at(I);
+    return InstCache.at(I);
   } else if (I->K == Inst::Phi) {
-    return LIC->getPhi(I->B, Ops);
+    if (!BlockCache.count(I->B)) {
+      auto BlockCopy = LIC->createBlock(I->B->Preds);
+      std::vector<Inst *> PredVars;
+      for (auto &PredVar : I->B->PredVars) {
+        if (InstCache.count(PredVar))
+          PredVars.emplace_back(InstCache[PredVar]);
+        else
+          PredVars.emplace_back(PredVar);
+      }
+      BlockCopy->PredVars = PredVars;
+      BlockCache[I->B] = BlockCopy;
+      return LIC->getPhi(BlockCopy, Ops);
+    } else
+      return LIC->getPhi(BlockCache.at(I->B), Ops);
   } else if (I->K == Inst::Const || I->K == Inst::UntypedConst) {
     return I;
-#if 0
-    if (!Replacements.count(I))
-      return I;
-    // Replace
-    return Replacements.at(I);
-#endif
   } else {
     return LIC->getInst(I->K, I->Width, Ops);
   }
@@ -1626,8 +1652,7 @@ bool InstSynthesis::isInputConst(const LocVar &Loc) {
 }
 
 void InstSynthesis::forbidInvalidCandWiring(const ProgramWiring &CandWiring,
-                                            std::vector<InstMapping> &LoopPCs,
-                                            std::vector<InstMapping> &WiringPCs) {
+                                            std::vector<InstMapping> &LoopPCs) {
   Inst *Ante = TrueConst;
   if (DebugLevel > 2)
     llvm::outs() << "not-working candidate, constraining wiring\n";
@@ -1641,7 +1666,6 @@ void InstSynthesis::forbidInvalidCandWiring(const ProgramWiring &CandWiring,
     Ante = LIC->getInst(Inst::And, 1, {Ante, Eq});
   }
   LoopPCs.emplace_back(Ante, FalseConst);
-  //WiringPCs.emplace_back(Ante, FalseConst);
 }
 
 int InstSynthesis::costHelper(Inst *I, std::set<Inst *> &Visited) {
@@ -1698,6 +1722,9 @@ std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Ins
         ConcreteValues[Input] = LIC->getConst(ModelVals[K]);
         Inst *Ne = LIC->getInst(Inst::Ne, 1, {Input, LIC->getConst(ModelVals[K])});
         InputPCs.emplace_back(Ne, TrueConst);
+      } else if (Name.find(BLOCK_PREFIX) != std::string::npos) {
+        auto Input = ModelInsts[K];
+        ConcreteValues[Input] = LIC->getConst(ModelVals[K]);
       } else if (Name.find("output") != std::string::npos) {
         ConcreteValues[CompInstMap[O.first]] = LIC->getConst(ModelVals[K]);
       }
@@ -1709,15 +1736,15 @@ std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Ins
 }
 
 
-std::error_code InstSynthesis::getConcreteLHSOutput(const std::map<Inst *, Inst *> &ConcreteInputs,
+std::error_code InstSynthesis::getConcreteLHSOutput(std::map<Inst *, Inst *> &ConcreteInputs,
                                                     llvm::APInt &Result) {
 
   std::error_code EC;
 
   std::vector<Inst *> ModelInsts;
   std::vector<llvm::APInt> ModelVals;
-  // Do we need to copy BPCs and LPCs here?
-  Inst *Copy = getInstCopy(LHS, ConcreteInputs);
+  std::map<Block *, Block *> BlockCache;
+  Inst *Copy = getInstCopy(LHS, ConcreteInputs, BlockCache);
   InstMapping Mapping(Copy, LIC->createVar(LHS->Width, "output"));
   // Negate the query to get a SAT model
   std::string QueryStr = BuildQuery(*LBPCs, *LPCs, Mapping,
@@ -1765,7 +1792,8 @@ Inst *InstSynthesis::initConcreteInputWirings(Inst *Query, Inst *WiringQuery,
         }
       }
     }
-    Inst *Copy = getInstCopy(WiringQuery, ValueMap);
+    std::map<Block *, Block *> BlockCache;
+    Inst *Copy = getInstCopy(WiringQuery, ValueMap, BlockCache);
     Query = LIC->getInst(Inst::And, 1, {Query, Copy});
     Query->DemandedBits = APInt::getAllOnesValue(Query->Width);
   }
