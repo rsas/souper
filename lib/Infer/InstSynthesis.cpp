@@ -306,7 +306,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       llvm::outs() << " (" << Cnt << " wiring(s) with constants reached "
                    << MaxWiringAttempts << " MaxWiringAttempts)";
     llvm::outs() << "\n";
-    llvm::outs() << "; comps = " << MaxCompNum
+    llvm::outs() << "; failed, comps = " << MaxCompNum
                  << ", cex = " << S.size()
                  << ", iterations = " << TotalRefinements << "\n";
   }
@@ -741,6 +741,8 @@ Inst *InstSynthesis::getConnectivityConstraint() {
                      << getLocVarStr(L_y.first) << "\n";
       // (l_x == l_y) => x == y
       Inst *Eq = LIC->getInst(Inst::Eq, 1, {L_x.second, L_y.second});
+      Eq = LIC->getInst(Inst::And, 1, {Eq, LIC->getInst(Inst::Ult, 1,
+                                                        {L_y.second, O.second})});
       Eq = LIC->getInst(Inst::Eq, 1, {Eq, FalseConst});
       Inst *Eq2 = LIC->getInst(Inst::Eq, 1, {X, Y});
       Inst *Implies = LIC->getInst(Inst::Or, 1, {Eq, Eq2});
