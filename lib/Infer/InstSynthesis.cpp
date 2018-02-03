@@ -147,6 +147,8 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     MaxCompNum = Comps.size();
 
   // Iterative synthesis loop with increasing number of components
+  unsigned TotalRefinements = 0;
+  unsigned Refinements = 0;
   for (int J = 1; J <= MaxCompNum; ++J) {
     if (DebugLevel > 1)
       llvm::outs() << "++++++++++++++++++++ "
@@ -160,7 +162,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
     // --------------------------------------------------------------------------
     // -------------- Counterexample driven synthesis loop ----------------------
     // --------------------------------------------------------------------------
-    unsigned Refinements = 0;
+    Refinements = 0;
     while (true) {
       Inst *Query = TrueConst;
       // Put each set of concrete inputs into a separate copy of the WiringQuery
@@ -254,12 +256,16 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
                        << ", RHS cost = " << CandCost
                        << ", benefit = " << (Benefit > 0 ? Benefit : 0)
                        << "\n";
+          llvm::outs() << "; comps = " << J
+                       << ", cex = " << S.size()
+                       << ", iterations = " << TotalRefinements << "\n";
         }
         RHS = Cand;
         return EC;
       }
 
       Refinements++;
+      TotalRefinements++;
       if (DebugLevel > 1)
         llvm::outs() << "didn't work for all inputs "
                      << "(#cex: "<< S.size()+1 << ", "
@@ -300,6 +306,9 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
       llvm::outs() << " (" << Cnt << " wiring(s) with constants reached "
                    << MaxWiringAttempts << " MaxWiringAttempts)";
     llvm::outs() << "\n";
+    llvm::outs() << "; comps = " << MaxCompNum
+                 << ", cex = " << S.size()
+                 << ", iterations = " << TotalRefinements << "\n";
   }
 
   return EC;
@@ -510,7 +519,7 @@ void InstSynthesis::printInitInfo() {
   llvm::outs() << "N: " << N << ", M: " << M << "\n";
   llvm::outs() << "default width: " << DefaultWidth << "\n";
   llvm::outs() << "output width: " << LHS->Width << "\n";
-  llvm::outs() << "component library: ";
+  llvm::outs() << "component library (#" << Comps.size() << "): ";
   for (auto const &Comp : Comps) {
     llvm::outs() << Inst::getKindName(Comp.Kind) << " (" << Comp.Width << ", { ";
     for (auto const &Width : Comp.OpWidths)

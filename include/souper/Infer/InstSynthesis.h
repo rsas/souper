@@ -176,14 +176,14 @@ private:
   /// Number of input variables
   unsigned N;
   /// Component locations
-  const unsigned M = 1024;
+  const unsigned M = 255;
   /// A mapping from a location variable to a concrete component instance,
   /// namely created instruction
   std::map<LocVar, Inst *> CompInstMap;
   /// Components' operand locations
   std::vector<std::vector<LocVar>> CompOpLocVars;
   /// Location variable's width (increase for support of >256 comps+inputs)
-  const unsigned LocInstWidth = 16;
+  const unsigned LocInstWidth = 8;
   /// A mapping from a location variable's string representation to its location.
   /// Required during model parsing
   std::map<std::string, LocInst> LocInstMap;
