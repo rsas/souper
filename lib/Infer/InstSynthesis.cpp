@@ -889,6 +889,7 @@ Inst *InstSynthesis::getConstInequalityConstraint() {
   return Ret;
 }
 
+#if 0
 Inst *InstSynthesis::getComponentConstInputConstraint() {
   Inst *Ret = TrueConst;
 
@@ -910,6 +911,47 @@ Inst *InstSynthesis::getComponentConstInputConstraint() {
 
   return Ret;
 }
+#else
+Inst *InstSynthesis::getComponentConstInputConstraint() {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "component const input constraints:\n";
+
+  // Forbid a component's operands to be constants only.
+  // An exemplary query that must hold true for a single component
+  // with two inputs and two constants:
+  // true && (false || (compin_1 == const_1) || (compin_1 == const_2))
+  //      && (false || (compin_2 == const_1) || (compin_2 == const_2)) == false
+  for (auto const &E : CompOpLocVars) {
+    Inst *CompAnte = TrueConst;
+    for (auto const &CompIn : E) {
+      Inst *Ante = FalseConst;
+      auto LocVarStr = getLocVarStr(CompIn, LOC_PREFIX);
+      for (auto const &In : I) {
+        if (!isInputConst(In.first))
+          continue;
+        if (isWiringInvalid(CompIn, In.first))
+          continue;
+        Inst *Eq = LIC->getInst(Inst::Eq, 1, {LocInstMap[LocVarStr].second, In.second});
+        Ante = LIC->getInst(Inst::Or, 1, {Ante, Eq});
+        if (DebugLevel > 2)
+          llvm::outs() << getLocVarStr(CompIn) << " == "
+                       << getLocVarStr(In.first) << " || ";
+      }
+      if (DebugLevel > 2)
+        llvm::outs() << "false\n";
+      CompAnte = LIC->getInst(Inst::And, 1, {CompAnte, Ante});
+    }
+    if (DebugLevel > 2)
+      llvm::outs() << "false\n";
+    Inst *Ne = LIC->getInst(Inst::Eq, 1, {CompAnte, FalseConst});
+    Ret = LIC->getInst(Inst::And, 1, {Ret, Ne});
+  }
+
+  return Ret;
+}
+#endif
 
 Inst *InstSynthesis::getComponentInputSymmetryConstraint() {
   Inst *Ret = TrueConst;
