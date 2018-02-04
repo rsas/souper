@@ -123,7 +123,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // concrete values from S
   std::vector<std::map<Inst *, Inst *>> S;
   // Ask the solver for a set of initial concrete inputs.
-  EC = getInitialConcreteInputs(S, 4);
+  EC = getInitialConcreteInputs(S, 2);
   if (EC)
     return EC;
 
@@ -1531,8 +1531,6 @@ std::error_code InstSynthesis::getInitialConcreteInputs(std::vector<std::map<Ins
       } else if (Name.find(BLOCK_PREFIX) != std::string::npos) {
         auto Input = ModelInsts[K];
         ConcreteValues[Input] = LIC->getConst(ModelVals[K]);
-      } else if (Name.find("output") != std::string::npos) {
-        ConcreteValues[CompInstMap[O.first]] = LIC->getConst(ModelVals[K]);
       }
     }
     S.push_back(ConcreteValues);
