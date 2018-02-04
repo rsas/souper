@@ -316,7 +316,7 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
 
 void InstSynthesis::setCompLibrary() {
   if (!CmdMaxCompNum)
-    return;
+    report_fatal_error("component number must be > 0");
   // First, choose which components to use
   std::vector<Component> InitComps, InitConstComps;
   if (CmdUserCompKinds.size()) {
@@ -324,8 +324,8 @@ void InstSynthesis::setCompLibrary() {
     // Parse user-provided component kind strings
     for (auto KindStr : splitString(CmdUserCompKinds.c_str())) {
       Inst::Kind K = Inst::getKind(KindStr);
-      if (KindStr == Inst::getKindName(Inst::Const)) // Special case
-        InitConstComps.push_back(Component{Inst::Const, 0, {}});
+      if (KindStr == Inst::getKindName(Inst::Const))
+        report_fatal_error("don't use const explicitly");
       else if (K == Inst::ZExt || K == Inst::SExt || K == Inst::Trunc)
         report_fatal_error("don't use zext/sext/trunc explicitly");
       else if (K == Inst::None)
@@ -341,12 +341,10 @@ void InstSynthesis::setCompLibrary() {
           InitComps.push_back(Comp);
   } else {
     InitComps = CompLibrary;
-    // one constant per component
-    //for (auto const &Comp : CompLibrary)
-    //  InitConstComps.push_back(Component{Inst::Const, 0, {}});
-    InitConstComps.push_back(Component{Inst::Const, 0, {}});
-    InitConstComps.push_back(Component{Inst::Const, 0, {}});
   }
+  // add one constant per component
+  for (auto const &Comp : InitComps)
+    InitConstComps.push_back(Component{Inst::Const, 0, {}});
   for (auto const &In : Inputs) {
     if (In->Width == DefaultWidth)
       continue;
@@ -950,12 +948,12 @@ Inst *InstSynthesis::getComponentConstInputConstraint() {
           llvm::outs() << getLocVarStr(CompIn) << " == "
                        << getLocVarStr(In.first) << " || ";
       }
-      if (DebugLevel > 2)
-        llvm::outs() << "false\n";
+      if (Ante == FalseConst)
+        continue;
       CompAnte = LIC->getInst(Inst::And, 1, {CompAnte, Ante});
     }
-    if (DebugLevel > 2)
-      llvm::outs() << "false\n";
+    if (CompAnte == TrueConst)
+      continue;
     Inst *Ne = LIC->getInst(Inst::Eq, 1, {CompAnte, FalseConst});
     Ret = LIC->getInst(Inst::And, 1, {Ret, Ne});
   }
