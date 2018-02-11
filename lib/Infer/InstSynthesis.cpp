@@ -27,6 +27,10 @@ static cl::opt<unsigned> DebugLevel("souper-synthesis-debug-level",
     "The larger the number is, the more fine-grained debug "
     "information will be printed"),
     cl::init(0));
+static cl::opt<int> SynthesisMode("souper-synthesis-mode",
+    cl::Hidden,
+    cl::desc("Synthesis mode"),
+    cl::init(0));
 static cl::opt<int> CmdMaxCompNum("souper-synthesis-comp-num",
     cl::desc("Maximum number of components (default=all)"),
     cl::init(-1));
@@ -99,13 +103,14 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Init a new set of path conditions
   std::vector<InstMapping> WiringPCs;
 
-  // Acyclicity constraint
-  WiringPCs.emplace_back(getAcyclicityConstraint(), TrueConst);
-
   // Location constraints of inputs, components' inputs and outputs
   WiringPCs.emplace_back(getInputLocVarConstraint(), TrueConst);
+  WiringPCs.emplace_back(getConstLocVarConstraint(), TrueConst);
   WiringPCs.emplace_back(getLocVarConstraint(P, 0, M), TrueConst);
   WiringPCs.emplace_back(getLocVarConstraint(R, N, M), TrueConst);
+
+  // Acyclicity constraint
+  WiringPCs.emplace_back(getAcyclicityConstraint(), TrueConst);
 
   // Different constraints
   //WiringPCs.emplace_back(getConstInequalityConstraint(), TrueConst);
@@ -149,149 +154,171 @@ std::error_code InstSynthesis::synthesize(SMTLIBSolver *SMTSolver,
   // Iterative synthesis loop with increasing number of components
   unsigned TotalRefinements = 0;
   unsigned Refinements = 0;
-  for (int J = 1; J <= MaxCompNum; ++J) {
-    if (DebugLevel > 1)
-      llvm::outs() << "++++++++++++++++++++ "
-                   << "synthesizing using " << J << " component(s)"
-                   << " ++++++++++++++++++++\n";
-    // Init fresh loop PCs
-    auto LoopPCs = WiringPCs;
-    // Constrain output locaction
-    LoopPCs.emplace_back(getLocVarConstraint({O}, N+J-1, N+J-1), TrueConst);
-
-    // --------------------------------------------------------------------------
-    // -------------- Counterexample driven synthesis loop ----------------------
-    // --------------------------------------------------------------------------
-    Refinements = 0;
-    while (true) {
-      Inst *Query = TrueConst;
-      // Put each set of concrete inputs into a separate copy of the WiringQuery
-      // Solve the synthesis constraint.
-      Query = initConcreteInputWirings(Query, WiringQuery, Refinements, S);
-
-      // Each solution corresponds to a syntactically distinct and well-formed
-      // straight-line program obtained by composition of given components
-      std::vector<Inst *> ModelInsts;
-      std::vector<llvm::APInt> ModelVals;
-      InstMapping Mapping(Query, TrueConst);
-      // Negate the query to get a SAT model.
-      // Don't use original BPCs/PCs, they are useless
-      std::string QueryStr = BuildQuery({}, LoopPCs, Mapping,
-                                        &ModelInsts, /*Negate=*/true);
-      if (QueryStr.empty())
-        return std::make_error_code(std::errc::value_too_large);
-      bool IsSat;
+  // 0 - #comps = #consts
+  // 1 - Increasing #comps, #consts = #comps
+  // 2 - Increasing #comps, increasing #consts
+  unsigned CompStart = 1;
+  if (SynthesisMode == 0)
+    CompStart = MaxCompNum;
+  for (int J = CompStart; J <= MaxCompNum; ++J) {
+    unsigned ConstStart = 0;
+    if (SynthesisMode == 0 || SynthesisMode == 1)
+      ConstStart = J;
+    for (int K = ConstStart; K <= J; ++K) {
       if (DebugLevel > 1)
-        llvm::outs() << "solving synthesis constraint.. ";
-      EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
-                                    &ModelVals, Timeout);
-      if (EC)
-        return EC;
-
-      // No valid wiring exists for the target comp number
-      if (!IsSat) {
-        if (DebugLevel > 1)
-          llvm::outs() << "UNSAT\n";
-        break;
+        llvm::outs() << "++++++++++++++++++++ "
+                     << "synthesizing using " << J << " components "
+                     << "and " << K << " constant(s)"
+                     << " ++++++++++++++++++++\n";
+      // Init fresh loop PCs
+      auto LoopPCs = WiringPCs;
+      // Constrain output locaction
+      LoopPCs.emplace_back(getLocVarConstraint({O}, N+J-1, N+J-1), TrueConst);
+      if (K == 0) {
+        for (const auto &LocCtrl: ConstLocCtrl)
+          LoopPCs.emplace_back(LocCtrl, TrueConst);
+      } else {
+        for (unsigned L = 1; L <= K; ++L) {
+          if (L <= K)
+            LoopPCs.emplace_back(ConstLocCtrl[L-1], TrueConst);
+          else
+            LoopPCs.emplace_back(ConstLocCtrl[L-1], FalseConst);
+        }
       }
 
-      if (DebugLevel > 1)
-        llvm::outs() << "SAT\n";
+      // --------------------------------------------------------------------------
+      // -------------- Counterexample driven synthesis loop ----------------------
+      // --------------------------------------------------------------------------
+      Refinements = 0;
+      while (true) {
+        Inst *Query = TrueConst;
+        // Put each set of concrete inputs into a separate copy of the WiringQuery
+        // Solve the synthesis constraint.
+        Query = initConcreteInputWirings(Query, WiringQuery, Refinements, S);
 
-      ProgramWiring CandWiring;
-      std::map<LocVar, llvm::APInt> ConstValMap;
-      Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
-                                       CandWiring, ConstValMap);
-      if (!Cand)
-        report_fatal_error("synthesis bug: creating inst from a model failed");
-
-      if (DebugLevel > 1) {
-        llvm::outs() << "candidate:\n";
-        PrintReplacementRHS(llvm::outs(), Cand, Context);
-      }
-
-      if (!CandSeen.insert(Cand).second)
-        report_fatal_error("synthesis bug: candidate has been seen already");
-
-      // The synthesis loop assumes that each component has a cost of one.
-
-      // The synthesis loop assumes that each component has a cost of one.
-      // However, this is not the case for all components (e.g., bswap).
-      // Moreover, some components can be comprised of two components to meet
-      // the DefaultWidth criteria. For example, if the DefaultWidth is 32
-      // and the engine uses ule during synthesis, the instantiation of ule
-      // would be zext(ule) to 32 and sext(ule) to 32. Therefore, the cost
-      // of such a component would be two and not one. To address this issue,
-      // we forbid candidates that have no cost benefit and continue to search
-      // for others
-      int CandCost = cost(Cand);
-      int Benefit = LHSCost - CandCost;
-      if (!IgnoreCost && Benefit <= 0) {
+        // Each solution corresponds to a syntactically distinct and well-formed
+        // straight-line program obtained by composition of given components
+        std::vector<Inst *> ModelInsts;
+        std::vector<llvm::APInt> ModelVals;
+        InstMapping Mapping(Query, TrueConst);
+        // Negate the query to get a SAT model.
+        // Don't use original BPCs/PCs, they are useless
+        std::string QueryStr = BuildQuery({}, LoopPCs, Mapping,
+                                          &ModelInsts, /*Negate=*/true);
+        if (QueryStr.empty())
+          return std::make_error_code(std::errc::value_too_large);
+        bool IsSat;
         if (DebugLevel > 1)
-          llvm::outs() << "candidate has no benefit\n";
-        forbidInvalidCandWiring(CandWiring, LoopPCs);
-        continue;
-      }
+          llvm::outs() << "solving synthesis constraint.. ";
+        EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                      &ModelVals, Timeout);
+        if (EC)
+          return EC;
 
-      // Does the candidate work for all inputs?
-      // Use original BPCs/PCs
-      ModelInsts.clear();
-      ModelVals.clear();
-      InstMapping CandMapping(LHS, Cand);
-      QueryStr = BuildQuery(BPCs, PCs, CandMapping, &ModelInsts, /*Negate=*/false);
-      if (QueryStr.empty())
-        return std::make_error_code(std::errc::value_too_large);
-      EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
-                                    &ModelVals, Timeout);
-      if (EC)
-        return EC;
+        // No valid wiring exists for the target comp number
+        if (!IsSat) {
+          if (DebugLevel > 1)
+            llvm::outs() << "UNSAT\n";
+          break;
+        }
 
-      // Success
-      if (!IsSat) {
         if (DebugLevel > 1)
-          llvm::outs() << "success:\n";
-        if (DebugLevel > 0) {
+          llvm::outs() << "SAT\n";
+
+        ProgramWiring CandWiring;
+        std::map<LocVar, llvm::APInt> ConstValMap;
+        Inst *Cand = createInstFromModel(std::make_pair(ModelInsts, ModelVals),
+                                         CandWiring, ConstValMap);
+        if (!Cand)
+          report_fatal_error("synthesis bug: creating inst from a model failed");
+
+        if (DebugLevel > 1) {
+          llvm::outs() << "candidate:\n";
           PrintReplacementRHS(llvm::outs(), Cand, Context);
-          llvm::outs() << "; LHS cost = " << LHSCost
-                       << ", RHS cost = " << CandCost
-                       << ", benefit = " << (Benefit > 0 ? Benefit : 0)
-                       << "\n";
-          llvm::outs() << "; comps = " << J
-                       << ", cex = " << S.size()
-                       << ", iterations = " << TotalRefinements << "\n";
         }
-        RHS = Cand;
-        return EC;
-      }
 
-      Refinements++;
-      TotalRefinements++;
-      if (DebugLevel > 1)
-        llvm::outs() << "didn't work for all inputs "
-                     << "(#cex: "<< S.size()+1 << ", "
-                     << "refinement: " << Refinements << ")\n";
-      // Parse input counterexamples from the model
-      std::map<Inst *, Inst *> ValueMap;
-      for (unsigned J = 0; J < ModelInsts.size(); ++J) {
-        auto Name = ModelInsts[J]->Name;
-        if (Name.find(INPUT_PREFIX) != std::string::npos) {
-          auto In = ModelInsts[J];
-          auto Val = ModelVals[J];
-          ValueMap[In] = IC.getConst(Val);
-          if (DebugLevel > 2)
-            llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
+        if (!CandSeen.insert(Cand).second)
+          report_fatal_error("synthesis bug: candidate has been seen already");
+
+        // The synthesis loop assumes that each component has a cost of one.
+
+        // The synthesis loop assumes that each component has a cost of one.
+        // However, this is not the case for all components (e.g., bswap).
+        // Moreover, some components can be comprised of two components to meet
+        // the DefaultWidth criteria. For example, if the DefaultWidth is 32
+        // and the engine uses ule during synthesis, the instantiation of ule
+        // would be zext(ule) to 32 and sext(ule) to 32. Therefore, the cost
+        // of such a component would be two and not one. To address this issue,
+        // we forbid candidates that have no cost benefit and continue to search
+        // for others
+        int CandCost = cost(Cand);
+        int Benefit = LHSCost - CandCost;
+        if (!IgnoreCost && Benefit <= 0) {
+          if (DebugLevel > 1)
+            llvm::outs() << "candidate has no benefit\n";
+          forbidInvalidCandWiring(CandWiring, LoopPCs);
+          continue;
         }
-      }
-      
-      // Add counterexamples to S
-      S.push_back(ValueMap);
 
-      // Constants are not constrained by the inputs, thus, we must explicitly
-      // constrain the not-working cand wiring incl. the constants and forbid
-      // the wiring completely after MaxWiringAttempts is reached
-      if (hasConst(Cand)) {
-        constrainConstWiring(Cand, CandWiring, NotWorkingConstWirings,
-                             ConstValMap, LoopPCs, WiringPCs);
+        // Does the candidate work for all inputs?
+        // Use original BPCs/PCs
+        ModelInsts.clear();
+        ModelVals.clear();
+        InstMapping CandMapping(LHS, Cand);
+        QueryStr = BuildQuery(BPCs, PCs, CandMapping, &ModelInsts, /*Negate=*/false);
+        if (QueryStr.empty())
+          return std::make_error_code(std::errc::value_too_large);
+        EC = SMTSolver->isSatisfiable(QueryStr, IsSat, ModelInsts.size(),
+                                      &ModelVals, Timeout);
+        if (EC)
+          return EC;
+
+        // Success
+        if (!IsSat) {
+          if (DebugLevel > 1)
+            llvm::outs() << "success:\n";
+          if (DebugLevel > 0) {
+            PrintReplacementRHS(llvm::outs(), Cand, Context);
+            llvm::outs() << "; LHS cost = " << LHSCost
+                         << ", RHS cost = " << CandCost
+                         << ", benefit = " << (Benefit > 0 ? Benefit : 0)
+                         << "\n";
+            llvm::outs() << "; comps = " << J
+                         << ", cex = " << S.size()
+                         << ", iterations = " << TotalRefinements << "\n";
+          }
+          RHS = Cand;
+          return EC;
+        }
+
+        Refinements++;
+        TotalRefinements++;
+        if (DebugLevel > 1)
+          llvm::outs() << "didn't work for all inputs "
+                       << "(#cex: "<< S.size()+1 << ", "
+                       << "refinement: " << Refinements << ")\n";
+        // Parse input counterexamples from the model
+        std::map<Inst *, Inst *> ValueMap;
+        for (unsigned J = 0; J < ModelInsts.size(); ++J) {
+          auto Name = ModelInsts[J]->Name;
+          if (Name.find(INPUT_PREFIX) != std::string::npos) {
+            auto In = ModelInsts[J];
+            auto Val = ModelVals[J];
+            ValueMap[In] = IC.getConst(Val);
+            if (DebugLevel > 2)
+              llvm::outs() << "counterexample: " << Name << " = " << Val << "\n";
+          }
+        }
+        
+        // Add counterexamples to S
+        S.push_back(ValueMap);
+
+        // Constants are not constrained by the inputs, thus, we must explicitly
+        // constrain the not-working cand wiring incl. the constants and forbid
+        // the wiring completely after MaxWiringAttempts is reached
+        if (hasConst(Cand))
+          constrainConstWiring(Cand, CandWiring, NotWorkingConstWirings,
+                               ConstValMap, LoopPCs, WiringPCs);
       }
     }
   }
@@ -342,9 +369,6 @@ void InstSynthesis::setCompLibrary() {
   } else {
     InitComps = CompLibrary;
   }
-  // add one constant per component
-  for (auto const &Comp : InitComps)
-    InitConstComps.push_back(Component{Inst::Const, 0, {}});
   for (auto const &In : Inputs) {
     if (In->Width == DefaultWidth)
       continue;
@@ -360,14 +384,12 @@ void InstSynthesis::setCompLibrary() {
         OpWidth = DefaultWidth;
     Comps.push_back(Comp);
   }
-  for (auto &Const : InitConstComps) {
-    if (!Const.Width)
-      Const.Width = DefaultWidth;
-    ConstComps.push_back(Const);
-  }
   // Third, create one trunc comp to match the output width if necessary
   if (LHS->Width < DefaultWidth)
     Comps.push_back(Component{Inst::Trunc, LHS->Width, {DefaultWidth}});
+  // Finally, add one constant per component
+  for (auto const &Comp : Comps)
+    ConstComps.push_back(Component{Inst::Const, DefaultWidth, {}});
 }
 
 void InstSynthesis::initInputVars() {
@@ -674,13 +696,38 @@ Inst *InstSynthesis::getInputLocVarConstraint() {
 
   if (DebugLevel > 2)
     llvm::outs() << "input location constraints:\n";
-  // All inputs
-  for (unsigned J = 0; J < N; ++J) {
+  // Inputs
+  for (unsigned J = 0; J < Inputs.size(); ++J) {
     auto const &L_x = I[J];
     if (DebugLevel > 2)
       llvm::outs() << getLocVarStr(L_x.first) << " == " << J << "\n";
     Inst *Eq = LIC->getInst(Inst::Eq, 1, {L_x.second, LIC->getConst(APInt(LocInstWidth, J))});
     Ret = LIC->getInst(Inst::And, 1, {Ret, Eq});
+  }
+
+  return Ret;
+}
+
+Inst *InstSynthesis::getConstLocVarConstraint() {
+  Inst *Ret = TrueConst;
+
+  if (DebugLevel > 2)
+    llvm::outs() << "const location constraints:\n";
+  // Constants
+  for (unsigned J = Inputs.size(); J < N; ++J) {
+    auto const &L_x = I[J];
+    Inst *LocCtrl = LIC->createVar(1, "loctrl");
+    ConstLocCtrl.emplace_back(LocCtrl);
+
+    Inst *Eq = LIC->getInst(Inst::Eq, 1, {L_x.second, LIC->getConst(APInt(LocInstWidth, J))});
+    Inst *Eq2 = LIC->getInst(Inst::Ule, 1, {L_x.second, O.second});
+    Eq2 = LIC->getInst(Inst::Eq, 1, {Eq2, FalseConst});
+    Inst *Select = LIC->getInst(Inst::Select, 1, {LocCtrl, Eq, Eq2});
+
+    if (DebugLevel > 2)
+      llvm::outs() << "locctrl == " << J << " ? " << getLocVarStr(L_x.first) << " == " << J
+                   << " : " << getLocVarStr(L_x.first) << " > " << getLocVarStr(O.first) << "\n";
+    Ret = LIC->getInst(Inst::And, 1, {Ret, Select});
   }
 
   return Ret;

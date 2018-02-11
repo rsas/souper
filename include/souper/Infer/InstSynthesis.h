@@ -161,6 +161,7 @@ private:
   std::vector<Component> Comps;
   /// Constant components
   std::vector<Component> ConstComps;
+  std::vector<Inst *> ConstLocCtrl;
   /// Program inputs
   std::vector<Inst *> Inputs;
   /// Default component width
@@ -233,6 +234,7 @@ private:
   Inst *getAcyclicityConstraint();
 
   Inst *getInputLocVarConstraint();
+  Inst *getConstLocVarConstraint();
 
   /// Begin <= O < End
   Inst *getLocVarConstraint(const std::vector<LocInst> &L,

@@ -1,5 +1,5 @@
 ; REQUIRES: solver
-; RUN: llvm-as %s -o - | %souper %solver -souper-infer-inst -souper-exploit-blockpcs -souper-synthesis-comps=add,and,const,const > %t2
+; RUN: llvm-as %s -o - | %souper %solver -souper-infer-inst -souper-exploit-blockpcs -souper-synthesis-comps=add,and > %t2
 ; RUN: FileCheck %s < %t2
 ; CHECK: cand %10 %12
 
