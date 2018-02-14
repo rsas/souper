@@ -1496,7 +1496,9 @@ Inst *getInstCopy(Inst *I, InstContext &IC,
 
   if (I->K == Inst::Var) {
     if (!InstCache.count(I)) {
-      Inst *Copy = IC.createVar(I->Width, "copy");
+      Inst *Copy = IC.createVar(I->Width, "copy", I->KnownZeros, I->KnownOnes,
+                                I->NonZero, I->NonNegative, I->PowOfTwo,
+                                I->Negative, I->NumSignBits);
       InstCache[I] = Copy;
       return Copy;
     } else
