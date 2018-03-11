@@ -147,10 +147,18 @@ public:
       std::vector<Inst *> Guesses;
       findCands(LHS, Guesses, IC, MaxNops);
 
+      llvm::errs() << "# Guesses: " << Guesses.size() << "\n";
       Inst *Ante = IC.getConst(APInt(1, true));
       BlockPCs BPCsCopy;
       std::vector<InstMapping> PCsCopy;
+      unsigned Index = 0;
       for (auto I : Guesses) {
+        if (Index++ < 1 || Index == 2)
+          continue;
+        //llvm::outs() << "## Index " << Index << "\n";
+        llvm::errs() << "### Kind: " << Inst::getKindName(I->K) << "\n";
+        ReplacementContext C;
+        llvm::errs() << GetReplacementLHSString(BPCs, PCs, I, C) << "\n";
         // separate sub-expressions by copying vars
         std::map<Inst *, Inst *> InstCache;
         std::map<Block *, Block *> BlockCache;
@@ -159,6 +167,8 @@ public:
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
         separateBlockPCs(BPCs, BPCsCopy, InstCache, BlockCache, IC);
         separatePCs(PCs, PCsCopy, InstCache, BlockCache, IC);
+        if (Index == 4)
+          break;
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
       InstMapping Mapping(Ante, IC.getConst(APInt(1, true)));
