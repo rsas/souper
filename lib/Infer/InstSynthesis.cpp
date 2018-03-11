@@ -1474,7 +1474,7 @@ void findCands(Inst *Root, std::vector<Inst *> &Guesses, InstContext &IC,
       }
       if (Benefit > 1 && I->Width == Root->Width && I->Available &&
           I->K != Inst::Const) {
-        llvm::errs() << "guessing a " << Inst::getKindName(I->K) << "\n";
+        llvm::errs() << "guessing a " << Inst::getKindName(I->K) << " with benefit " << Benefit << "\n";
         ReplacementContext RC;
         RC.printInst(I, llvm::errs(), true);
         llvm::errs() << "\n";
