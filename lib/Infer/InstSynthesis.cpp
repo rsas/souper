@@ -1470,10 +1470,16 @@ void findCands(Inst *Root, std::vector<Inst *> &Guesses, InstContext &IC,
     if (Visited.insert(I).second) {
       if (I->K != Inst::Phi) {
         for (auto Op : I->Ops)
-          Q.push(std::make_tuple(Op, Benefit));
+            Q.push(std::make_tuple(Op, Benefit));
       }
-      if (Benefit > 1 && I->Width == Root->Width && I->Available)
+      if (Benefit > 1 && I->Width == Root->Width && I->Available &&
+          I->K != Inst::Const) {
+        llvm::errs() << "guessing a " << Inst::getKindName(I->K) << "\n";
+        ReplacementContext RC;
+        RC.printInst(I, llvm::errs(), true);
+        llvm::errs() << "\n";
         Guesses.emplace_back(I);
+      }
       // TODO: run experiments and see if it's worth doing these
       if (0) {
         if (Benefit > 2 && I->Width > Root->Width)
