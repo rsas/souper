@@ -153,21 +153,30 @@ public:
       std::vector<InstMapping> PCsCopy;
       unsigned Index = 0;
       for (auto I : Guesses) {
-        if (Index++ < 1 || Index == 2)
+        if (Index == 1)
           continue;
-        //llvm::outs() << "## Index " << Index << "\n";
+        //if (Index++ < 1 || Index == 2)
+        //  continue;
+        llvm::outs() << "## Index " << Index << "\n";
         llvm::errs() << "### Kind: " << Inst::getKindName(I->K) << "\n";
         ReplacementContext C;
         llvm::errs() << GetReplacementLHSString(BPCs, PCs, I, C) << "\n";
         // separate sub-expressions by copying vars
         std::map<Inst *, Inst *> InstCache;
         std::map<Block *, Block *> BlockCache;
-        Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, InstCache, BlockCache),
-              getInstCopy(I, IC, InstCache, BlockCache)});
+        llvm::outs() << "@ creating first copy\n";
+        Inst *FirstCopy = getInstCopy(LHS, IC, InstCache, BlockCache);
+        llvm::outs() << "@ creating second copy\n";
+        Inst *SecondCopy = getInstCopy(I, IC, InstCache, BlockCache);
+        //Inst *Ne = IC.getInst(Inst::Ne, 1, {getInstCopy(LHS, IC, InstCache, BlockCache),
+        //      getInstCopy(I, IC, InstCache, BlockCache)});
+        Inst *Ne = IC.getInst(Inst::Ne, 1, {FirstCopy, SecondCopy});
         Ante = IC.getInst(Inst::And, 1, {Ante, Ne});
+        llvm::outs() << "@ separating blockpcs\n";
         separateBlockPCs(BPCs, BPCsCopy, InstCache, BlockCache, IC);
+        llvm::outs() << "@ separating pcs\n";
         separatePCs(PCs, PCsCopy, InstCache, BlockCache, IC);
-        if (Index == 4)
+        if (++Index == 3)
           break;
       }
       // (LHS != i_1) && (LHS != i_2) && ... && (LHS != i_n) == true
@@ -175,10 +184,12 @@ public:
       std::string Query = BuildQuery(BPCsCopy, PCsCopy, Mapping, 0, /*Negate=*/true);
       if (Query.empty())
         return std::make_error_code(std::errc::value_too_large);
+      llvm::errs() << Query << "\n";
       bool BigQueryIsSat;
       EC = SMTSolver->isSatisfiable(Query, BigQueryIsSat, 0, 0, Timeout);
       if (EC)
         return EC;
+      llvm::errs() << "Result: " << BigQueryIsSat << "\n";
 
       bool SmallQueryIsSat = true;
       if (StressNop || !BigQueryIsSat) {
@@ -234,9 +245,11 @@ public:
     std::string Query;
     if (Model && SMTSolver->supportsModels()) {
       std::vector<Inst *> ModelInsts;
+      llvm::outs() << "BPCs size:" << BPCs.size() << ", PCs size: " << PCs.size() << "\n";
       std::string Query = BuildQuery(BPCs, PCs, Mapping, &ModelInsts);
       if (Query.empty())
         return std::make_error_code(std::errc::value_too_large);
+      llvm::errs() << Query << "\n";
       bool IsSat;
       std::vector<llvm::APInt> ModelVals;
       std::error_code EC = SMTSolver->isSatisfiable(

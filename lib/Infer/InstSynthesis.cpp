@@ -1474,7 +1474,7 @@ void findCands(Inst *Root, std::vector<Inst *> &Guesses, InstContext &IC,
       }
       if (Benefit > 1 && I->Width == Root->Width && I->Available &&
           I->K != Inst::Const) {
-        llvm::errs() << "guessing a " << Inst::getKindName(I->K) << " with benefit " << Benefit << "\n";
+        //llvm::errs() << "guessing a " << Inst::getKindName(I->K) << " with benefit " << Benefit << "\n";
         ReplacementContext RC;
         RC.printInst(I, llvm::errs(), true);
         llvm::errs() << "\n";
@@ -1504,20 +1504,26 @@ Inst *getInstCopy(Inst *I, InstContext &IC,
 
   if (I->K == Inst::Var) {
     if (!InstCache.count(I)) {
+      llvm::errs() << "creating fresh Var, width " << I->Width << "\n";
       Inst *Copy = IC.createVar(I->Width, "copy", I->KnownZeros, I->KnownOnes,
                                 I->NonZero, I->NonNegative, I->PowOfTwo,
                                 I->Negative, I->NumSignBits);
       InstCache[I] = Copy;
       return Copy;
-    } else
+    } else {
+      llvm::errs() << "Var found in Cache, width " << I->Width << "\n";
       return InstCache.at(I);
+    }
   } else if (I->K == Inst::Phi)
     if (!BlockCache.count(I->B)) {
+      llvm::errs() << "creating fresh Block\n";
       auto BlockCopy = IC.createBlock(I->B->Preds);
       BlockCache[I->B] = BlockCopy;
       return IC.getPhi(BlockCopy, Ops);
-    } else
+    } else {
+      llvm::errs() << "Block from Cache\n";
       return IC.getPhi(BlockCache.at(I->B), Ops);
+    }
   else if (I->K == Inst::Const || I->K == Inst::UntypedConst)
     return I;
   else
