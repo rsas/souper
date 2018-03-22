@@ -1505,17 +1505,22 @@ Inst *getInstCopy(Inst *I, InstContext &IC,
       return Copy;
     } else
       return InstCache.at(I);
-  } else if (I->K == Inst::Phi)
+  } else if (I->K == Inst::Const || I->K == Inst::UntypedConst)
+    return I;
+
+  Inst *Ret;
+  if (I->K == Inst::Phi) {
     if (!BlockCache.count(I->B)) {
       auto BlockCopy = IC.createBlock(I->B->Preds);
       BlockCache[I->B] = BlockCopy;
-      return IC.getPhi(BlockCopy, Ops);
+      Ret = IC.getPhi(BlockCopy, Ops);
     } else
-      return IC.getPhi(BlockCache.at(I->B), Ops);
-  else if (I->K == Inst::Const || I->K == Inst::UntypedConst)
-    return I;
-  else
-    return IC.getInst(I->K, I->Width, Ops);
+      Ret = IC.getPhi(BlockCache.at(I->B), Ops);
+  } else
+    Ret = IC.getInst(I->K, I->Width, Ops);
+
+  Ret->DemandedBits = I->DemandedBits;
+  return Ret;
 }
 
 void separateBlockPCs(const BlockPCs &BPCs, BlockPCs &BPCsCopy,
