@@ -1,0 +1,9 @@
+; REQUIRES: solver
+; RUN: %souper-check -infer-rhs -souper-infer-nop -souper-stress-nop %solver %s | %FileCheck %s
+; CHECK: result %1
+
+%0:i16 = var (knownBits=11111111xxxxxxxx)
+%1:i16 = var
+%2 = and %0, %1
+infer %2 (demandedBits=0111111000000000)
+; result %1
